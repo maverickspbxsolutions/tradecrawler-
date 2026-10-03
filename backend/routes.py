@@ -23,7 +23,9 @@ api = APIRouter(prefix="/api", dependencies=[Depends(get_current_user)])
 # ---------------- Market ----------------
 @api.get("/market/symbols")
 async def symbols():
-    return {"symbols": md.POPULAR_SYMBOLS, "timeframes": list(md.TIMEFRAMES.keys())}
+    syms = await md.get_all_symbols()
+    return {"symbols": syms, "popular": md.POPULAR_SYMBOLS,
+            "timeframes": list(md.TIMEFRAMES.keys()), "default": "BTCUSDT"}
 
 
 @api.get("/market/candles")

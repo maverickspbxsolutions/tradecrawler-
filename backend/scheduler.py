@@ -9,7 +9,7 @@ from paper_engine import run_strategy_step
 
 logger = logging.getLogger(__name__)
 
-POLL_SECONDS = 60
+POLL_SECONDS = 30            # fast loop so closed-candle alerts fire promptly
 EVOLVE_SECONDS = 86400       # daily background evolution
 _task = None
 _evolve_task = None

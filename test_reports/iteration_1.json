@@ -1,0 +1,31 @@
+{
+  "summary": "Comprehensive backend (pytest, 14/14 passing) + frontend (Playwright) testing of the Crypto Signal Terminal. All 15 requested feature areas verified: JWT auth (login/me/wrong-pwd/401 on protected), strategies list enriched with backtest+paper+gate, create+backfill, backtest metrics + gate update, live toggle gate enforcement (400 when gate_passed=false, 200 when true), scan idempotency, signals feed, paper state, settings GET/PUT, Resend test email (delivered@resend.dev), evolution (generations, regime, OOS fitness, improvement, applied), market/regime, market/candles OHLCV. Frontend: login redirects to dashboard, disclaimer banner, stats bar, candlestick chart (green/red), timeframe selector, signal feed, 3 seeded strategy cards + enabled/live toggles + gate badge, backtest panel with equity curve vs buy-and-hold + verdict, paper panel, Evolution panel with regime badges + verdict + 'Evolve Now', 'Scan All', 'New' strategy dialog (rule editor adds entry/exit rules, saves and card appears), Settings dialog saves + Test email shows 'Test email sent' toast, logout. All critical data-testids present and interactive.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Dashboard initial render", "issues": ["Recharts emits 'width(-1) height(-1)' warnings on first paint before the container sizes; chart renders fine on next tick. Minor, cosmetic console noise only."]},
+      {"screen": "Settings dialog", "issues": ["Radix DialogContent missing aria-describedby / Description — accessibility warning only."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/backend_test.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [
+    "(Optional) Pass a Description or aria-describedby prop to Settings/Strategy DialogContent to silence a11y warnings.",
+    "(Optional) Give the price chart container a fixed height on first mount to avoid Recharts width(-1) warning."
+  ],
+  "critical_code_review_comments": [
+    "auth.py: solid — bcrypt, JWT 7d expiry, seed_admin re-hashes if admin password changed, protected routes via dependency. OK.",
+    "routes.py: live-gate correctly enforced in PUT /strategies/{sid}; backtest endpoint also force-disables live if gate drops. Good.",
+    "server.py: unique indexes on signals.sig_key and alerts.idempotency_key provide dedupe at the DB layer in addition to app logic. Nice defense-in-depth.",
+    "All MongoDB queries exclude _id — no ObjectId serialization issues observed.",
+    "CORS allow_origins=['*'] with allow_credentials=True is technically contradictory per spec; browsers ignore credentials when origin is '*'. Not a problem for this bearer-token app (no cookies) but worth tightening in production."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test.py"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "xambiep90 / Reddestroad1$ (shared single-user JWT auth, see /app/memory/test_credentials.md)",
+  "seed_data_creation": "Created a TEST_RSI_* strategy during pytest and a TEST_UI_* strategy during Playwright run; both deleted via DELETE /api/strategies/{id} after the run. DB left clean.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Everything works end-to-end. 14 pytest cases cover auth, strategies CRUD + gate, backtest, scan idempotency, signals, paper, candles, regime, settings, Resend test email, and evolution. Frontend has stable data-testids for every interactive element — reuse them for regression. Backend is on https://signal-engine-158.preview.emergentagent.com, bearer token from POST /api/auth/login."
+}

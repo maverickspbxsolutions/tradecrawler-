@@ -23,8 +23,33 @@ TIMEFRAMES = {
 
 POPULAR_SYMBOLS = [
     "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT",
-    "ADAUSDT", "AVAXUSDT", "LINKUSDT", "LTCUSDT", "MATICUSDT",
+    "ADAUSDT", "AVAXUSDT", "LINKUSDT", "LTCUSDT", "BNBUSDT", "DOTUSDT", "MATICUSDT",
 ]
+
+_symbols_cache = {"t": 0, "list": None}
+
+
+async def get_all_symbols():
+    """All TRADING USDT pairs on Binance.US, majors first. Cached 1h."""
+    now = time.time()
+    if _symbols_cache["list"] and now - _symbols_cache["t"] < 3600:
+        return _symbols_cache["list"]
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.get(f"{BINANCE_BASE}/exchangeInfo")
+            r.raise_for_status()
+            data = r.json()
+        usdt = [s["symbol"] for s in data.get("symbols", [])
+                if s.get("status") == "TRADING" and s.get("quoteAsset") == "USDT"]
+        pset = set(usdt)
+        priority = [s for s in POPULAR_SYMBOLS if s in pset]
+        rest = sorted(s for s in usdt if s not in set(POPULAR_SYMBOLS))
+        ordered = priority + rest
+        _symbols_cache.update({"t": now, "list": ordered})
+        return ordered
+    except Exception as e:  # noqa
+        logger.warning(f"exchangeInfo fetch failed: {e}")
+        return _symbols_cache["list"] or POPULAR_SYMBOLS
 
 _cache: dict = {}
 _CACHE_TTL = 25  # seconds

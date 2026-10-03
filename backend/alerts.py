@@ -14,9 +14,13 @@ from db import db
 
 logger = logging.getLogger(__name__)
 
-EMAIL_BASE_URL = "https://integrations.emergentagent.com"
-EMAIL_KEY = os.environ["EMERGENT_EMAIL_KEY"]
+# Direct Resend integration (independent of Emergent) — uses the user's own key.
+RESEND_URL = "https://api.resend.com/emails"
+RESEND_API_KEY = os.environ["RESEND_API_KEY"]
+RESEND_FROM_EMAIL = os.environ.get("RESEND_FROM_EMAIL", "onboarding@resend.dev")
 EMAIL_FROM_NAME = os.environ["EMAIL_FROM_NAME"]
+EMAIL_FROM = f"{EMAIL_FROM_NAME} <{RESEND_FROM_EMAIL}>"
+EMAIL_REPLY_TO = os.environ.get("EMAIL_REPLY_TO")
 
 _SHORTENERS = ("bit.ly", "tinyurl.com", "t.co", "is.gd", "cutt.ly", "goo.gl", "rebrand.ly")
 _CRED_ASK = ("reply with your password", "reply with the code", "send your password", "cvv",
@@ -93,14 +97,13 @@ def _assert_safe_email(subject: str, html: str) -> None:
 
 async def send_email(*, to: str, subject: str, html: str) -> str | None:
     _assert_safe_email(subject, html)
-    payload = {"to": [to], "subject": subject, "html": html, "from_name": EMAIL_FROM_NAME}
-    reply_to = os.environ.get("EMAIL_REPLY_TO")
-    if reply_to:
-        payload["contact_email"] = reply_to
+    payload = {"from": EMAIL_FROM, "to": [to], "subject": subject, "html": html}
+    if EMAIL_REPLY_TO:
+        payload["reply_to"] = EMAIL_REPLY_TO
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.post(
-            f"{EMAIL_BASE_URL}/api/v1/email/send",
-            headers={"X-Email-Key": EMAIL_KEY},
+            RESEND_URL,
+            headers={"Authorization": f"Bearer {RESEND_API_KEY}", "Content-Type": "application/json"},
             json=payload,
         )
     resp.raise_for_status()

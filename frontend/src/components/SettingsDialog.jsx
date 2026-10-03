@@ -71,7 +71,7 @@ export function SettingsDialog({ open, onOpenChange }) {
                 <Send className="h-3.5 w-3.5 mr-1" /> Test
               </Button>
             </div>
-            <p className="text-[10px] text-muted-foreground mt-1">Signal alerts send only for strategies that are Live and have passed the backtest gate.</p>
+            <p className="text-[10px] text-muted-foreground mt-1">Signal alerts send only for strategies that are Live and have passed the backtest gate. Sent from your own Resend account. To deliver to any inbox, verify a domain in Resend and set RESEND_FROM_EMAIL.</p>
           </div>
 
           <div className="flex items-center justify-between border border-border/40 bg-background rounded-sm px-3 py-2">

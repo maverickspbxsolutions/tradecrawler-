@@ -20,8 +20,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { SymbolCombobox } from "@/components/SymbolCombobox";
 
-const SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT", "ADAUSDT", "AVAXUSDT", "LINKUSDT", "LTCUSDT", "MATICUSDT"];
 const TFS = ["1m", "5m", "15m", "1h", "4h", "1d"];
 const INDICATORS = [
   { value: "rsi", label: "RSI" },
@@ -215,7 +215,10 @@ export function StrategyFormDialog({ open, onOpenChange, strategy }) {
               <Label className="text-[10px] font-mono uppercase text-muted-foreground">Name</Label>
               <Input value={form.name} onChange={(e) => set("name", e.target.value)} className="h-8 rounded-sm mt-0.5" placeholder="e.g. RSI Mean Reversion" data-testid="strategy-name-input" />
             </div>
-            <Pick label="Symbol" value={form.symbol} onChange={(v) => set("symbol", v)} options={SYMBOLS.map((s) => ({ value: s, label: s }))} />
+            <div>
+              <Label className="text-[9px] font-mono uppercase text-muted-foreground">Symbol</Label>
+              <SymbolCombobox value={form.symbol} onChange={(v) => set("symbol", v)} />
+            </div>
             <Pick label="Timeframe" value={form.timeframe} onChange={(v) => set("timeframe", v)} options={TFS.map((t) => ({ value: t, label: t }))} />
             <Pick label="Rule Logic" value={form.logic} onChange={(v) => set("logic", v)} options={[{ value: "AND", label: "AND (all)" }, { value: "OR", label: "OR (any)" }]} />
             <div className="flex gap-3">
