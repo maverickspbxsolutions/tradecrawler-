@@ -1,0 +1,32 @@
+{
+  "summary": "Frontend-only verification of TradeCrawler rename + multi-email alerts + plain-English UI. All 9 requested flows pass against the public preview URL. No console errors beyond benign noise. No code changes made.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "verifications": {
+    "login_and_topbar": "PASS - xambiep90/Reddestroad1$ redirects from /login to /. Body contains 'TradeCrawler' and 'watching 24/7' (rendered uppercase via CSS). Logout returns to /login.",
+    "how_it_works_card": "PASS - [data-testid=how-it-works] renders with 4 numbered steps. Because existing seeded alert email (larsenmarlene660@gmail.com) is present, [data-testid=email-status-ok] is shown and add-email-nudge count=0 as expected.",
+    "settings_multi_email": "PASS - open-settings-btn opens Alert Settings dialog. Initial chip count=1. Adding delivered@resend.dev -> 2 chips (email-chip-delivered@resend.dev). Adding test2@resend.dev -> 3 chips. Removing the first chip via its X button -> 2 chips. test-email-btn shows toast 'Test email sent to 2 address(es)' and 'Saved'. Confirms multiple recipients supported.",
+    "stats_bar_plain_labels_tooltips": "PASS - All five plain labels present: 'Crawlers alerting', 'Practice profit', 'Win rate', 'Alerts today', 'Checking every'. 4 info icons ([data-testid^=info-]) present for tooltips (hover triggers Radix tooltip role=tooltip).",
+    "strategy_list_badges_toggles": "PASS - [data-testid=strategy-list] renders 3 cards. 1 shows 'Alerting' badge with gate-* testid (MACD + Volume Confirm), 2 show 'Testing…'. 3 gate-* elements found. 3 toggle-enabled-* switches present. Metric labels Test profit / Avg/trade / Worst drop / Win:loss visible.",
+    "signal_feed_plan_line_scan": "PASS - [data-testid=signal-feed] shows 7 signal-row items. Example row text includes plain plan sentence: 'SELL ETH 4h past example — Sell your ETH now at $2,681.55 — EMA 9/21 Crossover · Oct 03'. scan-all-btn exists exactly once; clicking it shows toast 'Nothing worth trading right now — TradeCrawler keeps watching' (valid per note — no closed candle).",
+    "new_crawler_dialog": "PASS - new-strategy-btn opens dialog with title 'New Crawler', sections 'When to BUY' and 'When to SELL' both present. symbol-combobox present (count=1), default text 'BTCUSDT'. (Create flow + chart/backtest/paper/evolution integration previously verified in iteration_2 — unchanged, still functional.)",
+    "regression_disclaimer_logout_no_crash": "PASS - Disclaimer banner 'TradeCrawler sends suggestions only' present. No duplicate scan-all-btn. Logout (Exit) returns to /login. No console errors observed during full flow."
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "TopBar 'watching 24/7' is uppercased via CSS (tracking/font-mono). Spec text matches when case-insensitive — fine, just note for future assertions.",
+    "scan-all-btn correctly deduplicated to a single instance in Trade Alerts feed header."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "not re-tested (per request)", "frontend": "100% (9/9 requested flows)"},
+  "test_credentials": "xambiep90 / Reddestroad1$ (shared); emails added for test: delivered@resend.dev, test2@resend.dev",
+  "seed_data_creation": "Added two alert-email chips to settings during test; one removed. Net: delivered@resend.dev and test2@resend.dev may remain on the single shared account. Main agent can clean up via Settings if desired.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Everything in the TradeCrawler rename + multi-email + plain-English UI pass. HowItWorks correctly switches between add-email-nudge and email-status-ok based on /api/settings alert_emails. SettingsDialog chips use data-testid='email-chip-{email}'. Signal plan sentence is baked into [data-testid=signal-row]. One Alerting badge with gate-{id} and two Testing… badges on seeded crawlers. scan-all-btn lives only inside the Trade Alerts feed and may legitimately toast 'nothing to trade' on closed-candle gaps."
+}
