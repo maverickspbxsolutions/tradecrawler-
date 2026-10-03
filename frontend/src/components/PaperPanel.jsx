@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import { Wallet, Activity } from "lucide-react";
 import { api, fmtUsd, fmtPct, pnlColor, fmtTime } from "@/lib/api";
+import { useChartTheme } from "@/lib/useChartTheme";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 function M({ label, value, cls }) {
@@ -14,6 +15,7 @@ function M({ label, value, cls }) {
 }
 
 export function PaperPanel({ strategy }) {
+  const theme = useChartTheme();
   const sid = strategy?.id;
   const { data } = useQuery({
     queryKey: ["paper", sid],
@@ -59,15 +61,15 @@ export function PaperPanel({ strategy }) {
                 <YAxis
                   orientation="right"
                   width={58}
-                  tick={{ fontSize: 10, fontFamily: "Azeret Mono", fill: "#8A8A93" }}
+                  tick={{ fontSize: 10, fontFamily: "Azeret Mono", fill: theme.axis }}
                   tickFormatter={(v) => `$${(v / 1000).toFixed(1)}k`}
                   domain={["auto", "auto"]}
                 />
                 <Tooltip
-                  contentStyle={{ background: "#121215", border: "1px solid #1F1F24", borderRadius: 2, fontFamily: "Azeret Mono", fontSize: 12 }}
+                  contentStyle={{ background: theme.tooltipBg, border: `1px solid ${theme.tooltipBorder}`, color: theme.tooltipText, borderRadius: 2, fontFamily: "Azeret Mono", fontSize: 12 }}
                   formatter={(v) => [fmtUsd(v), "Equity"]}
                 />
-                <Line type="stepAfter" dataKey="equity" stroke="#00E676" strokeWidth={1.6} dot={false} />
+                <Line type="stepAfter" dataKey="equity" stroke={theme.buy} strokeWidth={1.6} dot={false} />
               </LineChart>
             </ResponsiveContainer>
           ) : (

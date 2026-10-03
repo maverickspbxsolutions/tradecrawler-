@@ -8,6 +8,7 @@ import asyncio
 import logging
 import httpx
 import websockets
+from urllib.parse import quote as urlquote
 
 logger = logging.getLogger(__name__)
 
@@ -221,6 +222,90 @@ async def _get_deriv_candles(symbol: str, timeframe: str, limit: int, closed_onl
         health.update({"last_ok": time.time(), "source": "deriv", "error": None})
     return candles
 
+
+# ---------------- Yahoo Finance (real data for Gold, crypto, forex, indices) ----------------
+# Synthetic/Volatility indices are Deriv-only and have no external source.
+_SYNTH_PREFIXES = ("R_", "1HZ", "BOOM", "CRASH", "stpRNG", "JD", "RDBULL", "RDBEAR", "WLD")
+
+# Deriv symbol -> Yahoo Finance ticker (real-world equivalent)
+DERIV_TO_YAHOO = {
+    "frxXAUUSD": "GC=F", "frxXAGUSD": "SI=F", "frxXPTUSD": "PL=F", "frxXPDUSD": "PA=F",
+    "cryBTCUSD": "BTC-USD", "cryETHUSD": "ETH-USD", "cryLTCUSD": "LTC-USD",
+    "cryXRPUSD": "XRP-USD", "cryBCHUSD": "BCH-USD", "cryEOSUSD": "EOS-USD",
+    "frxEURUSD": "EURUSD=X", "frxGBPUSD": "GBPUSD=X", "frxUSDJPY": "USDJPY=X",
+    "frxAUDUSD": "AUDUSD=X", "frxUSDCAD": "USDCAD=X", "frxUSDCHF": "USDCHF=X",
+    "frxNZDUSD": "NZDUSD=X", "frxEURGBP": "EURGBP=X", "frxEURJPY": "EURJPY=X",
+    "frxGBPJPY": "GBPJPY=X",
+    "OTC_SPC": "^GSPC", "OTC_NDX": "^NDX", "OTC_DJI": "^DJI", "OTC_FTSE": "^FTSE",
+    "OTC_GDAXI": "^GDAXI", "OTC_N225": "^N225", "OTC_HSI": "^HSI", "OTC_AS51": "^AXJO",
+}
+
+# timeframe -> (yahoo interval, yahoo range)
+YF_TF = {
+    "1m": ("1m", "5d"), "5m": ("5m", "1mo"), "15m": ("15m", "1mo"),
+    "1h": ("60m", "3mo"), "4h": ("60m", "6mo"), "1d": ("1d", "1y"),
+}
+
+
+def _is_synthetic(sym: str) -> bool:
+    return bool(sym) and sym.startswith(_SYNTH_PREFIXES)
+
+
+def _yahoo_for(symbol: str):
+    return DERIV_TO_YAHOO.get(symbol)
+
+
+def _deriv_msg(symbol: str) -> str:
+    if _is_synthetic(symbol):
+        return ("Synthetic & Volatility indices are generated only by Deriv — they come online "
+                "automatically once the app can reach Deriv (works from the deployed site).")
+    return "Live data for this market is temporarily unavailable."
+
+
+def _resample(candles: list, seconds: int) -> list:
+    out, order = {}, []
+    for c in candles:
+        b = ((int(c["t"]) // 1000) // seconds) * seconds * 1000
+        if b not in out:
+            out[b] = {"t": b, "o": c["o"], "h": c["h"], "l": c["l"], "c": c["c"], "v": c["v"]}
+            order.append(b)
+        else:
+            x = out[b]
+            x["h"] = max(x["h"], c["h"])
+            x["l"] = min(x["l"], c["l"])
+            x["c"] = c["c"]
+            x["v"] += c["v"]
+    return [out[b] for b in order]
+
+
+async def _fetch_yahoo(ticker: str, timeframe: str, limit: int, closed_only: bool = True):
+    interval, rng = YF_TF[timeframe]
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{urlquote(ticker, safe='')}"
+    async with httpx.AsyncClient(timeout=12, headers={"User-Agent": "Mozilla/5.0"}) as client:
+        r = await client.get(url, params={"interval": interval, "range": rng})
+        r.raise_for_status()
+        data = r.json()
+    res = (data.get("chart", {}).get("result") or [None])[0]
+    if not res:
+        return []
+    ts = res.get("timestamp") or []
+    q = (res.get("indicators", {}).get("quote") or [{}])[0]
+    o, h, l, c, v = (q.get("open", []), q.get("high", []), q.get("low", []),
+                     q.get("close", []), q.get("volume", []))
+    candles = []
+    for i in range(len(ts)):
+        if i >= len(c) or c[i] is None or o[i] is None or h[i] is None or l[i] is None:
+            continue
+        candles.append({"t": int(ts[i]) * 1000, "o": float(o[i]), "h": float(h[i]),
+                        "l": float(l[i]), "c": float(c[i]),
+                        "v": float(v[i]) if i < len(v) and v[i] is not None else 0.0})
+    if timeframe == "4h":
+        candles = _resample(candles, 14400)
+    if closed_only and len(candles) > 1:
+        candles = candles[:-1]
+    return candles[-limit:]
+
+
 _cache: dict = {}
 _CACHE_TTL = 25  # seconds
 
@@ -278,14 +363,26 @@ async def get_candles(symbol: str, timeframe: str, limit: int = 300, closed_only
         raise ValueError(f"Unsupported timeframe: {timeframe}")
 
     if _is_deriv_symbol(symbol):
+        yf = _yahoo_for(symbol)
+        if yf:
+            try:
+                candles = await _fetch_yahoo(yf, timeframe, limit, closed_only)
+                if candles:
+                    health.update({"last_ok": time.time(), "source": "yahoo", "error": None})
+                    return candles
+            except Exception as e:  # noqa
+                logger.warning(f"Yahoo fetch failed for {symbol} ({yf}): {e}")
+                raise DerivUnavailable(_deriv_msg(symbol)) from e
+            raise DerivUnavailable(_deriv_msg(symbol))
+        # synthetic/volatility indices: Deriv-only
         if _deriv_blocked():
-            raise DerivUnavailable("Live data for this market is temporarily unavailable.")
+            raise DerivUnavailable(_deriv_msg(symbol))
         try:
             return await _get_deriv_candles(symbol, timeframe, limit, closed_only)
         except Exception as e:  # noqa
             _block_deriv(60)
             logger.warning(f"Deriv candles failed for {symbol}: {e}")
-            raise DerivUnavailable("Live data for this market is temporarily unavailable.") from e
+            raise DerivUnavailable(_deriv_msg(symbol)) from e
 
     key = f"{symbol.upper()}:{timeframe}:{limit}:{closed_only}"
     now = time.time()
@@ -342,7 +439,15 @@ async def get_live(symbol: str, timeframe: str):
     candle = None
     source = None
     if _is_deriv_symbol(symbol):
-        if not _deriv_blocked():
+        yf = _yahoo_for(symbol)
+        if yf:
+            try:
+                rows = await _fetch_yahoo(yf, timeframe, 2, closed_only=False)
+                if rows:
+                    candle, source = rows[-1], "yahoo"
+            except Exception as e:  # noqa
+                logger.warning(f"Yahoo live fetch failed for {symbol} ({yf}): {e}")
+        elif not _deriv_blocked():
             try:
                 rows = await asyncio.wait_for(
                     _get_deriv_candles(symbol, timeframe, 2, closed_only=False), 6)

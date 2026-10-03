@@ -3,9 +3,9 @@ import { api } from "@/lib/api";
 import { TrendingUp, TrendingDown, Minus, Activity } from "lucide-react";
 
 const DIR = {
-  Up: { color: "#00E676", icon: TrendingUp, label: "Leaning Up", bg: "rgba(0,230,118,0.10)", border: "rgba(0,230,118,0.4)" },
-  Down: { color: "#FF3366", icon: TrendingDown, label: "Leaning Down", bg: "rgba(255,51,102,0.10)", border: "rgba(255,51,102,0.4)" },
-  Neutral: { color: "#8A8A93", icon: Minus, label: "Range / Unclear", bg: "rgba(138,138,147,0.10)", border: "rgba(138,138,147,0.35)" },
+  Up: { v: "--buy", icon: TrendingUp, label: "Leaning Up" },
+  Down: { v: "--sell", icon: TrendingDown, label: "Leaning Down" },
+  Neutral: { v: "--muted-foreground", icon: Minus, label: "Range / Unclear" },
 };
 
 function Chip({ label, value, tone }) {
@@ -28,10 +28,14 @@ export function MarketOutlook({ symbol, tf }) {
 
   const d = DIR[data?.direction] || DIR.Neutral;
   const Icon = d.icon;
+  const color = `hsl(var(${d.v}))`;
+  const bg = `hsl(var(${d.v}) / 0.1)`;
+  const border = `hsl(var(${d.v}) / 0.4)`;
+  const BUY = "hsl(var(--buy))";
+  const SELL = "hsl(var(--sell))";
   const m = data?.metrics || {};
-  const slopeTone = m.trend_slope_pct > 0 ? "#00E676" : m.trend_slope_pct < 0 ? "#FF3366" : undefined;
-  const macdTone = m.macd_hist > 0 ? "#00E676" : m.macd_hist < 0 ? "#FF3366" : undefined;
-  const changeTone = m.recent_change_pct > 0 ? "#00E676" : m.recent_change_pct < 0 ? "#FF3366" : undefined;
+  const slopeTone = m.trend_slope_pct > 0 ? BUY : m.trend_slope_pct < 0 ? SELL : undefined;
+  const macdTone = m.macd_hist > 0 ? BUY : m.macd_hist < 0 ? SELL : undefined;
 
   return (
     <div className="border border-border/40 bg-card rounded-sm" data-testid="market-outlook">
@@ -55,12 +59,12 @@ export function MarketOutlook({ symbol, tf }) {
           <>
             <div
               className="flex items-center justify-between rounded-sm px-3 py-2.5"
-              style={{ background: d.bg, border: `1px solid ${d.border}` }}
+              style={{ background: bg, border: `1px solid ${border}` }}
             >
               <div className="flex items-center gap-2.5">
-                <Icon className="h-6 w-6" style={{ color: d.color }} />
+                <Icon className="h-6 w-6" style={{ color }} />
                 <div className="flex flex-col">
-                  <span className="text-lg font-semibold leading-none" style={{ color: d.color }} data-testid="outlook-direction">
+                  <span className="text-lg font-semibold leading-none" style={{ color }} data-testid="outlook-direction">
                     {d.label}
                   </span>
                   <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono mt-1">
@@ -69,7 +73,7 @@ export function MarketOutlook({ symbol, tf }) {
                 </div>
               </div>
               <div className="flex flex-col items-end">
-                <span className="num text-2xl font-bold" style={{ color: d.color }} data-testid="outlook-confidence">
+                <span className="num text-2xl font-bold" style={{ color }} data-testid="outlook-confidence">
                   {data.confidence}%
                 </span>
                 <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono">confidence</span>
@@ -79,7 +83,7 @@ export function MarketOutlook({ symbol, tf }) {
             <div className="h-1.5 w-full rounded-full bg-background/60 overflow-hidden">
               <div
                 className="h-full rounded-full transition-all duration-500"
-                style={{ width: `${data.confidence}%`, background: d.color }}
+                style={{ width: `${data.confidence}%`, background: color }}
                 data-testid="outlook-confidence-bar"
               />
             </div>
@@ -94,7 +98,7 @@ export function MarketOutlook({ symbol, tf }) {
             <ul className="space-y-1.5" data-testid="outlook-reasons">
               {(data.reasons || []).map((r, i) => (
                 <li key={i} className="flex gap-2 text-xs text-foreground/90">
-                  <span className="mt-1 h-1 w-1 rounded-full shrink-0" style={{ background: d.color }} />
+                  <span className="mt-1 h-1 w-1 rounded-full shrink-0" style={{ background: color }} />
                   <span>{r}</span>
                 </li>
               ))}

@@ -75,7 +75,7 @@ export function SignalFeed() {
               return (
                 <div
                   key={s.id}
-                  className={`flex items-start gap-3 px-4 py-2.5 border-b border-border/30 hover:bg-[#1A1A1F] ${buy ? "flash-buy" : "flash-sell"}`}
+                  className={`flex items-start gap-3 px-4 py-2.5 border-b border-border/30 hover:bg-accent ${buy ? "flash-buy" : "flash-sell"}`}
                   data-testid="signal-row"
                 >
                   <div className={`h-7 w-7 shrink-0 grid place-items-center rounded-sm ${buy ? "bg-buy/10 text-buy" : "bg-sell/10 text-sell"}`}>

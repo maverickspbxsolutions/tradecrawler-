@@ -3,6 +3,7 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } f
 import { toast } from "sonner";
 import { Dna, Loader2, TrendingUp, TrendingDown, Minus, Activity, CheckCircle2, CircleSlash } from "lucide-react";
 import { api, fmtPct, pnlColor, fmtTime } from "@/lib/api";
+import { useChartTheme } from "@/lib/useChartTheme";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 
@@ -43,6 +44,7 @@ function diffParams(oldP, newP) {
 }
 
 export function EvolutionPanel({ strategy }) {
+  const theme = useChartTheme();
   const qc = useQueryClient();
   const sid = strategy?.id;
 
@@ -122,12 +124,12 @@ export function EvolutionPanel({ strategy }) {
               <div className="text-[10px] font-mono uppercase tracking-[0.1em] text-muted-foreground mb-1">Fitness per generation</div>
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={gens} margin={{ top: 6, right: 8, left: 0, bottom: 0 }}>
-                  <XAxis dataKey="gen" tick={{ fontSize: 9, fontFamily: "Azeret Mono", fill: "#8A8A93" }} />
-                  <YAxis width={40} tick={{ fontSize: 9, fontFamily: "Azeret Mono", fill: "#8A8A93" }} domain={["auto", "auto"]} />
-                  <Tooltip contentStyle={{ background: "#121215", border: "1px solid #1F1F24", borderRadius: 2, fontFamily: "Azeret Mono", fontSize: 11 }} />
+                  <XAxis dataKey="gen" tick={{ fontSize: 9, fontFamily: "Azeret Mono", fill: theme.axis }} />
+                  <YAxis width={40} tick={{ fontSize: 9, fontFamily: "Azeret Mono", fill: theme.axis }} domain={["auto", "auto"]} />
+                  <Tooltip contentStyle={{ background: theme.tooltipBg, border: `1px solid ${theme.tooltipBorder}`, color: theme.tooltipText, borderRadius: 2, fontFamily: "Azeret Mono", fontSize: 11 }} />
                   <Legend wrapperStyle={{ fontSize: 9, fontFamily: "Azeret Mono" }} />
-                  <Line type="monotone" dataKey="Best" stroke="#00E5FF" strokeWidth={1.6} dot={false} />
-                  <Line type="monotone" dataKey="Avg" stroke="#565660" strokeWidth={1.2} dot={false} />
+                  <Line type="monotone" dataKey="Best" stroke={theme.accent} strokeWidth={1.6} dot={false} />
+                  <Line type="monotone" dataKey="Avg" stroke={theme.muted} strokeWidth={1.2} dot={false} />
                 </LineChart>
               </ResponsiveContainer>
             </div>

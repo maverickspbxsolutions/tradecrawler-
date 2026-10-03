@@ -1,9 +1,10 @@
 import { useRef, useState, useEffect } from "react";
-
-const GREEN = "#00E676";
-const RED = "#FF3366";
+import { useChartTheme } from "@/lib/useChartTheme";
 
 export function Candlestick({ candles, height = 240, liveLast = false }) {
+  const theme = useChartTheme();
+  const GREEN = theme.buy || "#00E676";
+  const RED = theme.sell || "#FF3366";
   const ref = useRef(null);
   const [w, setW] = useState(800);
   const [hover, setHover] = useState(null);
@@ -71,8 +72,8 @@ export function Candlestick({ candles, height = 240, liveLast = false }) {
           const y = yFor(v);
           return (
             <g key={i}>
-              <line x1={0} y1={y} x2={plotW} y2={y} stroke="#1F1F24" strokeWidth={1} />
-              <text x={plotW + 5} y={y + 3} fill="#8A8A93" fontSize="10" fontFamily="Azeret Mono">
+              <line x1={0} y1={y} x2={plotW} y2={y} stroke={theme.grid} strokeWidth={1} />
+              <text x={plotW + 5} y={y + 3} fill={theme.axis} fontSize="10" fontFamily="Azeret Mono">
                 {fmt(v)}
               </text>
             </g>
@@ -124,7 +125,7 @@ export function Candlestick({ candles, height = 240, liveLast = false }) {
       </svg>
 
       {hover && (
-        <div className="absolute top-1 left-1 bg-[#121215] border border-border/60 rounded-sm px-2 py-1 text-[10px] font-mono num pointer-events-none">
+        <div className="absolute top-1 left-1 bg-popover border border-border rounded-sm px-2 py-1 text-[10px] font-mono num pointer-events-none">
           <span className="text-muted-foreground">O</span> {fmt(hover.c.o)}{" "}
           <span className="text-muted-foreground">H</span> <span className="text-buy">{fmt(hover.c.h)}</span>{" "}
           <span className="text-muted-foreground">L</span> <span className="text-sell">{fmt(hover.c.l)}</span>{" "}

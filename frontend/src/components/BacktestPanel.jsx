@@ -3,6 +3,7 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } f
 import { toast } from "sonner";
 import { Play, Loader2, TrendingUp, Trophy } from "lucide-react";
 import { api, fmtUsd, fmtPct, pnlColor, fmtTime } from "@/lib/api";
+import { useChartTheme } from "@/lib/useChartTheme";
 import { Button } from "@/components/ui/button";
 
 function M({ label, value, cls }) {
@@ -15,6 +16,7 @@ function M({ label, value, cls }) {
 }
 
 export function BacktestPanel({ strategy }) {
+  const theme = useChartTheme();
   const qc = useQueryClient();
   const sid = strategy?.id;
 
@@ -78,18 +80,18 @@ export function BacktestPanel({ strategy }) {
                 <YAxis
                   orientation="right"
                   width={58}
-                  tick={{ fontSize: 10, fontFamily: "Azeret Mono", fill: "#8A8A93" }}
+                  tick={{ fontSize: 10, fontFamily: "Azeret Mono", fill: theme.axis }}
                   tickFormatter={(v) => `$${(v / 1000).toFixed(1)}k`}
                   domain={["auto", "auto"]}
                 />
                 <Tooltip
-                  contentStyle={{ background: "#121215", border: "1px solid #1F1F24", borderRadius: 2, fontFamily: "Azeret Mono", fontSize: 12 }}
+                  contentStyle={{ background: theme.tooltipBg, border: `1px solid ${theme.tooltipBorder}`, color: theme.tooltipText, borderRadius: 2, fontFamily: "Azeret Mono", fontSize: 12 }}
                   labelFormatter={(t) => fmtTime(new Date(t).toISOString())}
                   formatter={(v, n) => [fmtUsd(v), n]}
                 />
                 <Legend wrapperStyle={{ fontSize: 10, fontFamily: "Azeret Mono" }} />
-                <Line type="monotone" dataKey="Strategy" stroke="#00E5FF" strokeWidth={1.6} dot={false} />
-                <Line type="monotone" dataKey="Buy & Hold" stroke="#565660" strokeWidth={1.2} strokeDasharray="4 3" dot={false} />
+                <Line type="monotone" dataKey="Strategy" stroke={theme.accent} strokeWidth={1.6} dot={false} />
+                <Line type="monotone" dataKey="Buy & Hold" stroke={theme.muted} strokeWidth={1.2} strokeDasharray="4 3" dot={false} />
               </LineChart>
             </ResponsiveContainer>
           </div>

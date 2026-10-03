@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api, fmtUsd, fmtPct, pnlColor } from "@/lib/api";
 import { Candlestick } from "@/components/Candlestick";
+import { useChartTheme } from "@/lib/useChartTheme";
 import {
   Select,
   SelectContent,
@@ -13,6 +14,7 @@ import {
 const TFS = ["1m", "5m", "15m", "1h", "4h", "1d"];
 
 export function PriceChart({ symbol, tf, onTfChange }) {
+  const theme = useChartTheme();
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000);
@@ -64,7 +66,7 @@ export function PriceChart({ symbol, tf, onTfChange }) {
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-border/40">
         <div className="flex items-baseline gap-3 flex-wrap">
           <span className="num text-lg font-semibold">{symbol}</span>
-          <span className="num text-xl" style={{ color: up ? "#00E676" : "#FF3366" }} data-testid="price-last">
+          <span className="num text-xl" style={{ color: up ? theme.buy : theme.sell }} data-testid="price-last">
             {last != null ? fmtUsd(last, last < 10 ? 4 : 2) : "—"}
           </span>
           {changePct != null && (
@@ -77,9 +79,9 @@ export function PriceChart({ symbol, tf, onTfChange }) {
           >
             <span
               className="inline-block h-1.5 w-1.5 rounded-full"
-              style={{ background: liveOk ? "#00E676" : "#8A8A93", animation: liveOk ? "pulse 1.2s infinite" : "none" }}
+              style={{ background: liveOk ? theme.buy : theme.muted, animation: liveOk ? "pulse 1.2s infinite" : "none" }}
             />
-            <span style={{ color: liveOk ? "#00E676" : "#8A8A93" }}>
+            <span style={{ color: liveOk ? theme.buy : theme.muted }}>
               {liveOk ? `Live · ${ageSec ?? 0}s ago` : unavailable ? "Unavailable" : "Delayed"}
             </span>
           </span>
