@@ -72,11 +72,15 @@ async def market_health():
 @api.get("/strategies")
 async def list_strategies():
     strats = await db.strategies.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    ids = [s["id"] for s in strats]
+    bts = await db.backtests.find(
+        {"strategy_id": {"$in": ids}}, {"_id": 0, "equity_curve": 0, "trades": 0}).to_list(1000)
+    sts = await db.paper_states.find({"strategy_id": {"$in": ids}}, {"_id": 0}).to_list(1000)
+    bt_map = {b["strategy_id"]: b for b in bts}
+    st_map = {p["strategy_id"]: p for p in sts}
     for s in strats:
-        bt = await db.backtests.find_one({"strategy_id": s["id"]}, {"_id": 0, "equity_curve": 0, "trades": 0})
-        st = await db.paper_states.find_one({"strategy_id": s["id"]}, {"_id": 0})
-        s["backtest"] = bt
-        s["paper"] = st
+        s["backtest"] = bt_map.get(s["id"])
+        s["paper"] = st_map.get(s["id"])
     return strats
 
 
