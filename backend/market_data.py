@@ -61,7 +61,7 @@ DERIV_API_TOKEN = os.environ.get("DERIV_API_TOKEN")
 DERIV_WS = f"wss://ws.derivws.com/websockets/v3?app_id={DERIV_APP_ID}"
 _DERIV_PREFIXES = ("R_", "1HZ", "frx", "cry", "OTC_", "WLD", "JD", "stpRNG",
                    "BOOM", "CRASH", "RDBULL", "RDBEAR")
-_deriv_sym_cache = {"t": 0, "list": None}
+_deriv_sym_cache = {"t": 0, "list": None, "fail_t": 0}
 _deriv_symbol_set: set = set()
 
 
@@ -75,7 +75,7 @@ def _is_deriv_symbol(sym: str) -> bool:
     return sym.startswith(_DERIV_PREFIXES)
 
 
-async def _deriv_call(payload: dict, timeout: int = 20) -> dict:
+async def _deriv_call(payload: dict, timeout: int = 8) -> dict:
     async with websockets.connect(
         DERIV_WS, open_timeout=timeout, close_timeout=5,
         additional_headers={"Origin": "https://app.deriv.com", "User-Agent": "Mozilla/5.0"},
@@ -97,8 +97,11 @@ async def get_deriv_symbols():
     now = time.time()
     if _deriv_sym_cache["list"] and now - _deriv_sym_cache["t"] < 3600:
         return _deriv_sym_cache["list"]
+    if now - _deriv_sym_cache.get("fail_t", 0) < 60:  # negative cache: don't hammer a down server
+        return _deriv_sym_cache["list"] or []
     try:
-        resp = await _deriv_call({"active_symbols": "brief", "product_type": "basic"})
+        resp = await asyncio.wait_for(
+            _deriv_call({"active_symbols": "brief", "product_type": "basic"}, timeout=5), 6)
         syms = resp.get("active_symbols", [])
         out = [{
             "symbol": s["symbol"],
@@ -106,11 +109,12 @@ async def get_deriv_symbols():
             "market": s.get("market_display_name", "Deriv"),
             "submarket": s.get("submarket_display_name", ""),
         } for s in syms]
-        _deriv_sym_cache.update({"t": now, "list": out})
+        _deriv_sym_cache.update({"t": now, "list": out, "fail_t": 0})
         _deriv_symbol_set.clear()
         _deriv_symbol_set.update(s["symbol"] for s in out)
         return out
     except Exception as e:  # noqa
+        _deriv_sym_cache["fail_t"] = now
         logger.warning(f"Deriv active_symbols failed: {e}")
         return _deriv_sym_cache["list"] or []
 

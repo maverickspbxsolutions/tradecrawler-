@@ -1,0 +1,38 @@
+{
+  "summary": "Frontend-only regression verification of the Deriv integration + SymbolCombobox in TradeCrawler. Login (xambiep90) works, dashboard loads with the new spider icon + 'TradeCrawler' brand, header reads 'CRYPTO TRADE ALERTS · 24/7'. The New Crawler dialog's data-testid=symbol-combobox opens the cmdk popover with data-testid=symbol-search, grouped under a single 'Crypto (Binance)' heading containing exactly 202 options (deriv_available=false, as expected per the environment note). Typing 'ETH' filters to ETH* options (symbol-option-ETHUSDT, THETAUSDT, HYPEUSDT, RHEAUSDT); clicking symbol-option-ETHUSDT updates the trigger to 'ETH / USDT'. Filling the Name field and clicking save-strategy-btn creates a card (TEST_ETH_Crawler, ETH · 1h chart) and shows a 'Strategy created' toast; selecting it swaps the top price chart to ETHUSDT ($2,685.50) and all panels (price-chart, candlestick-chart, backtest-panel, paper-panel, evolution-panel, mini-simulations) render. Theme toggle (theme-toggle-btn) correctly flips html.className between 'dark' and 'light'. Settings 'Send test' with delivered@resend.dev shows success toast 'Test email sent to 1 address(es)'. Only console noise is the benign recharts width(-1)/height(-1) warning. No JS errors.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/market/symbols", "issue": "First response takes ~5-6s because routes.py awaits md.get_deriv_symbols() inline and Deriv WS fails with Cloudflare 520 after a wait. During this window the SymbolCombobox renders only its single hard-coded BTCUSDT fallback and the search returns 'No instrument found.' React-Query caches the result for 1h (staleTime), so subsequent dialog opens are instant, but the first-ever open per session feels broken. Suggest: (a) call get_deriv_symbols concurrently with Binance via asyncio.gather and return as soon as Binance is ready if Deriv times out quickly, OR (b) negative-cache a failed Deriv result for ~60s so the 520 WS handshake isn't re-attempted on every request, OR (c) kick off a background prefetch at login and keep the /symbols route returning Binance-only until Deriv recovers."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "New Crawler · Symbol picker initial open", "issue": "Because the backend blocks for ~5-6s on Deriv WS, the SymbolCombobox shows only the hard-coded fallback [BTCUSDT] during that window. Typing 'ETH' before the response arrives produces a misleading 'No instrument found.' Suggest showing a loading state (e.g. a 'Loading instruments…' row or a spinner on the trigger while useQuery.isLoading) instead of the single-option fallback, so users don't believe the list is truly empty.", "affected_selectors": ["[data-testid=\"symbol-combobox\"]", "[data-testid=\"symbol-search\"]", "[data-testid^=\"symbol-option-\"]"]}
+    ],
+    "design_issues": [
+      {"screen": "Dashboard price chart", "issues": ["Benign recharts console warning: 'The width(-1) and height(-1) of chart should be greater than 0' on initial mount — chart still renders correctly, cosmetic only (noted previously in iteration_5)."]}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Make /api/market/symbols return quickly even when Deriv WS is unreachable (negative-cache failures or run get_deriv_symbols in a background task). Current ~6s block makes the combobox look empty on first open.",
+    "In SymbolCombobox.jsx, display a loading state while useQuery is pending (e.g. hide the fallback BTCUSDT single-row when isLoading && !data) and show 'Loading instruments…' so the first-open UX isn't misleading."
+  ],
+  "critical_code_review_comments": [
+    "backend/routes.py GET /api/market/symbols: awaits md.get_deriv_symbols() inline with no fallback timeout. When Deriv is unreachable (520 from Cloudflare), each uncached request waits for the WS open timeout (~5-6s) and returns the same Binance-only list it would have returned instantly. Combine with asyncio.wait_for(deriv_call, timeout=2) + negative cache, or asyncio.gather with a short Deriv deadline.",
+    "frontend/SymbolCombobox.jsx: the fallback `data?.options || [{BTCUSDT fallback}]` conflates the 'loading' state with the 'loaded but empty' state. Prefer `if (isLoading) show skeleton; else if (!options.length) show CommandEmpty; else render groups`.",
+    "frontend/SymbolCombobox.jsx: React-Query staleTime 1h with no cacheTime/retry config means a failed first fetch could be sticky for the session; consider retry: 2 + a shorter staleTime (60s) once Deriv-backed options are expected.",
+    "Minor: PopoverContent fixed width w-[300px] truncates longer Deriv labels like 'Volatility 100 Index' once Deriv groups appear — may want w-[340px] or min-w.",
+    "DialogContent missing aria-describedby warning (Radix) surfaced in console — add DialogDescription or aria-describedby to the New Crawler dialog for a11y."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (skipped per request)", "frontend": "100% of requested regression flows pass; one UX issue flagged on first open of the symbol picker"},
+  "test_credentials": "xambiep90 / Reddestroad1$ (works). Test email: delivered@resend.dev",
+  "seed_data_creation": "Created strategy 'TEST_ETH_Crawler' (ETHUSDT, 1h). It was NOT deleted — the delete button inside strategy-card is not nested under the card's testid root (no [data-testid^=\"delete-strategy-\"] inside the card). Main agent may want to clean up manually or expose a delete testid.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "SymbolCombobox: after opening the New Crawler dialog, you MUST poll the DOM for [data-testid^=\"symbol-option-\"] count > 1 for up to ~8 seconds before searching/selecting. On a cold cache the first /api/market/symbols call takes ~5-6s because Deriv WS fails with Cloudflare 520; during that window only the fallback BTCUSDT option exists and typing 'ETH' shows 'No instrument found.'. After React-Query caches the response (staleTime 1h), subsequent opens are instant. Confirmed via direct fetch: /api/market/symbols returns 202 options under single market 'Crypto (Binance)', deriv_available=false, default=BTCUSDT. Theme toggle sets html.className to 'light'/'dark' (next-themes). Settings dialog email input testid is 'alert-email-input' and the test-send button is 'test-email-btn' (NOT 'send-test-btn').",
+  "rca of the issue": "/api/market/symbols currently blocks on get_deriv_symbols() even though Deriv is unreachable from this environment. Deriv WS raises after the open_timeout, which takes ~5-6s. During that wait the SymbolCombobox falls back to a single hard-coded BTCUSDT row and users see 'No instrument found.' when they search. The fix is either backend-side (fail Deriv fast and negative-cache the failure) or frontend-side (render a loading/skeleton state while useQuery.isLoading instead of the fallback single row). Once the response lands all 202 Binance pairs render, grouping/search/select all work correctly."
+}

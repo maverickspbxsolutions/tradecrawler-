@@ -16,16 +16,14 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 
 export function SymbolCombobox({ value, onChange }) {
   const [open, setOpen] = useState(false);
-  const { data } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: ["symbols"],
     queryFn: async () => (await api.get("/market/symbols")).data,
-    staleTime: 3600000,
+    staleTime: 600000,
+    retry: 1,
   });
 
-  const options = useMemo(
-    () => data?.options || [{ symbol: "BTCUSDT", label: "BTC / USDT", market: "Crypto (Binance)" }],
-    [data]
-  );
+  const options = useMemo(() => data?.options || [], [data]);
 
   const groups = useMemo(() => {
     const g = {};
@@ -46,15 +44,15 @@ export function SymbolCombobox({ value, onChange }) {
           className="h-8 w-full justify-between rounded-sm text-xs font-mono mt-0.5"
           data-testid="symbol-combobox"
         >
-          <span className="truncate">{current?.label || value || "Select instrument"}</span>
+          <span className="truncate">{current?.label || value || (isLoading ? "Loading…" : "Select instrument")}</span>
           <ChevronsUpDown className="h-3.5 w-3.5 opacity-50 shrink-0" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-[300px] p-0 rounded-sm" align="start">
+      <PopoverContent className="w-[340px] p-0 rounded-sm" align="start">
         <Command>
           <CommandInput placeholder="Search Gold, BTC, Volatility, EURUSD…" className="h-9 text-xs font-mono" data-testid="symbol-search" />
           <CommandList className="max-h-[320px]">
-            <CommandEmpty>No instrument found.</CommandEmpty>
+            <CommandEmpty>{isLoading ? "Loading instruments…" : "No instrument found."}</CommandEmpty>
             {Object.entries(groups).map(([market, items]) => (
               <CommandGroup key={market} heading={market}>
                 {items.map((o) => (

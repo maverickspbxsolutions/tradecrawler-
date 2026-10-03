@@ -110,6 +110,7 @@ async def on_startup():
     await db.strategies.update_many({"gate_passed": True}, {"$set": {"live": True}})
     await db.strategies.update_many({"gate_passed": {"$ne": True}}, {"$set": {"live": False}})
     asyncio.create_task(bootstrap_engine())
+    asyncio.create_task(md.get_deriv_symbols())  # warm Deriv symbol cache in background
     start_scheduler()
     logger.info("Crypto Signal Terminal backend started")
 
