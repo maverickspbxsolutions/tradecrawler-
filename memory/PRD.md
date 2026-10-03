@@ -78,6 +78,11 @@ out-of-sample validation and market-regime detection.
   (static fallback) and the app degrades gracefully. Deriv candles/outlook should start working from
   a deployed runtime with different network egress — validate `active_symbols` + candles for
   frxXAUUSD, cryBTCUSD and R_100 after deploy. A numeric Deriv app_id (not a pat_ token) may be needed.
+- Deriv App ID clarification: the user's Deriv app is an OAuth app, App ID `34zIy2UfIdAzHQNsLhUod`
+  (saved as DERIV_OAUTH_APP_ID, redirect https://tradecrawler.live/). Per Deriv docs, OAuth App IDs are
+  for account LOGIN flows; market data is a PUBLIC no-auth WebSocket that uses the legacy NUMERIC app_id.
+  So DERIV_APP_ID stays "1089" (public numeric) for charts/signals; the OAuth App ID is only needed if
+  "log in with Deriv"/account features are added later (out of scope — TradeCrawler is alerts-only).
 - For SPOT crypto (BTC/ETH/etc.), Binance.US is the more accurate real-market source; Deriv crypto is
   a CFD/synthetic feed. Crypto live price + Market Outlook are fully working now.
 - Resend sender defaults to `onboarding@resend.dev` (RESEND_FROM_EMAIL). To deliver to any
