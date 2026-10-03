@@ -30,6 +30,7 @@ export function MiniSimulations({ strategy }) {
   });
 
   const st = data?.stats;
+  const tuning = data?.tuning;
   const paths = data?.sample_paths || [];
   const median = data?.median_path || [];
   const len = median.length || (paths[0]?.points?.length ?? 0);
@@ -45,7 +46,7 @@ export function MiniSimulations({ strategy }) {
   return (
     <div className="border border-border/40 bg-card rounded-sm" data-testid="mini-simulations">
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-border/40">
-        <InfoLabel tip="A quick 'what-if': we replay this crawler's past trade results in random orders 400 times to show how a $20 stake might grow or shrink over its next 20 trades. It's a rough preview, not a promise.">
+        <InfoLabel tip="A streak-aware 'what-if': we replay this crawler's past trades in realistic runs (keeping winning/losing streaks), 400 times, and tune the result to today's volatility and live Market Outlook. It shows how a $20 stake might grow or shrink over its next 20 trades — a rough preview, not a promise.">
           <span className="flex items-center gap-1.5"><Dices className="h-3.5 w-3.5" /> Mini Simulations</span>
         </InfoLabel>
         <Button
@@ -106,9 +107,34 @@ export function MiniSimulations({ strategy }) {
             <Chip label="Good case" value={fmtUsd(st.p90)} cls="text-buy" />
             <Chip label="Rough case" value={fmtUsd(st.p10)} cls="text-sell" />
             <Chip label="Chance of profit" value={`${st.prob_profit}%`} cls={st.prob_profit >= 50 ? "text-buy" : "text-sell"} />
+            <Chip label="Worst dip on the way" value={`${st.median_max_drawdown_pct}%`} cls="text-sell" />
+            <Chip label="Chance of losing half" value={`${st.prob_lose_half}%`} cls={st.prob_lose_half > 0 ? "text-sell" : "text-muted-foreground"} />
           </div>
+
+          {st.expected_duration && (
+            <p className="text-[12px] text-muted-foreground">
+              These {TRADES} trades would typically play out over{" "}
+              <span className="text-foreground num">{st.expected_duration}</span>.
+            </p>
+          )}
+
+          {tuning?.applied ? (
+            <p className="text-[11px] font-mono text-muted-foreground flex flex-wrap items-center gap-x-2" data-testid="sim-tuning">
+              <span className="text-primary">Tuned to current market:</span>
+              <span>{strategy?.symbol} outlook{" "}
+                <span style={{ color: tuning.direction === "Up" ? "hsl(var(--buy))" : tuning.direction === "Down" ? "hsl(var(--sell))" : undefined }}>
+                  {tuning.direction} ({tuning.confidence}%)
+                </span>
+              </span>
+              {tuning.regime && <span>· volatility {tuning.regime.volatility}</span>}
+              <span>· swing scale ×{tuning.vol_ratio}</span>
+            </p>
+          ) : tuning?.reason ? (
+            <p className="text-[11px] font-mono text-muted-foreground" data-testid="sim-tuning">{tuning.reason}</p>
+          ) : null}
+
           <p className="text-[10px] text-muted-foreground font-mono">
-            Based on {st.sample_size} past trades · break-even line = ${CAP}. Rough preview only — not a prediction or advice.
+            Streak-aware replay of {st.sample_size} past trades · break-even line = ${CAP}. Rough preview only — not a prediction or advice.
           </p>
         </div>
       )}

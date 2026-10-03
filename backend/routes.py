@@ -13,7 +13,7 @@ from auth import get_current_user
 import market_data as md
 from strategy_engine import Strategy, StrategyCreate, StrategyUpdate
 from backtester import run_backtest
-from paper_engine import run_strategy_step, backfill_signals, PAPER_CAPITAL
+from paper_engine import run_strategy_step, backfill_signals, PAPER_CAPITAL, _humanize_duration
 from alerts import get_settings, send_email, EMAIL_FROM_NAME
 from scheduler import POLL_SECONDS, EVOLVE_SECONDS
 from evolution import evolve_strategy, detect_regime
@@ -214,9 +214,11 @@ async def get_backtest(sid: str):
 
 @api.get("/strategies/{sid}/simulate")
 async def simulate(sid: str, trades: int = 20, paths: int = 400, capital: float = 20.0):
-    """Quick Monte-Carlo: stake `capital` across `trades` future trades, bootstrapped
-    from the strategy's historical trade returns (or win/avg model). Returns a few
-    sample equity paths + outcome stats."""
+    """Streak-aware Monte-Carlo tuned to current market conditions.
+    - Block bootstrap of the strategy's historical trade returns (preserves win/loss streaks).
+    - Scales magnitude to today's volatility and tilts drift by the live Market Outlook.
+    - Reports typical/good/rough endings, profit odds, worst drawdown, risk of losing half,
+      and a realistic time horizon. Rough preview only — not a prediction."""
     s = await db.strategies.find_one({"id": sid}, {"_id": 0})
     if not s:
         raise HTTPException(404, "Strategy not found")
@@ -236,13 +238,55 @@ async def simulate(sid: str, trades: int = 20, paths: int = 400, capital: float 
     if not returns:
         raise HTTPException(400, "Run a test first so there's data to simulate")
 
-    arr = np.array(returns, dtype=float) / 100.0
+    seq = np.array(returns, dtype=float) / 100.0  # ordered historical trade returns (fractions)
+    n = len(seq)
+
+    # ---- tune to current market conditions (volatility + live outlook) ----
+    vol_ratio = 1.0
+    tilt = 0.0
+    tuning = {"applied": False, "direction": None, "confidence": None,
+              "vol_ratio": 1.0, "regime": None, "reason": None}
+    try:
+        candles = await md.get_candles(s["symbol"], s["timeframe"], 300)
+        closes = np.array([c["c"] for c in candles], dtype=float)
+        if len(closes) > 30:
+            r = np.diff(closes) / closes[:-1]
+            vol_recent = float(np.std(r[-20:]))
+            vol_ref = float(np.std(r[-120:])) if len(r) >= 120 else float(np.std(r))
+            if vol_ref > 0:
+                vol_ratio = float(np.clip(vol_recent / vol_ref, 0.6, 1.6))
+        ol = compute_outlook(candles, s["symbol"], s["timeframe"])
+        regime = detect_regime(candles)
+        sign = 1 if ol["direction"] == "Up" else -1 if ol["direction"] == "Down" else 0
+        tilt = sign * (ol.get("confidence", 0) / 100.0) * 0.004  # up to ±0.4% drift/trade
+        tuning = {"applied": True, "direction": ol["direction"],
+                  "confidence": ol.get("confidence", 0), "vol_ratio": round(vol_ratio, 2),
+                  "regime": regime, "reason": None}
+    except Exception as e:  # noqa
+        tuning["reason"] = "Live market data unavailable — showing untuned history."
+
+    # ---- streak-aware block bootstrap ----
     rng = np.random.default_rng()
-    draws = rng.choice(arr, size=(paths, trades), replace=True)
+    block = int(min(max(2, n // 4), 5))
+    draws = np.empty((paths, trades), dtype=float)
+    for p in range(paths):
+        row = []
+        while len(row) < trades:
+            start = int(rng.integers(0, n))
+            row.extend(seq[start:start + block].tolist())
+        draws[p] = row[:trades]
+    draws = draws * vol_ratio + tilt  # apply current-market tuning
+
     equity = np.concatenate(
         [np.full((paths, 1), capital), np.cumprod(1.0 + draws, axis=1) * capital], axis=1)
     ending = equity[:, -1]
     order = np.argsort(ending)
+
+    runmax = np.maximum.accumulate(equity, axis=1)
+    path_maxdd = (equity / runmax - 1.0).min(axis=1)  # most-negative dip per path
+
+    avg_hold_ms = (bt or {}).get("avg_hold_ms")
+    horizon = _humanize_duration(avg_hold_ms * trades) if avg_hold_ms else None
 
     stats = {
         "capital": capital,
@@ -254,14 +298,18 @@ async def simulate(sid: str, trades: int = 20, paths: int = 400, capital: float 
         "best": round(float(ending.max()), 2),
         "worst": round(float(ending.min()), 2),
         "prob_profit": round(float((ending > capital).mean() * 100), 1),
-        "avg_trade_pct": round(float(arr.mean() * 100), 3),
+        "prob_lose_half": round(float((ending < capital * 0.5).mean() * 100), 1),
+        "median_max_drawdown_pct": round(float(np.median(path_maxdd)) * 100, 1),
+        "avg_trade_pct": round(float(seq.mean() * 100), 3),
         "sample_size": len(returns),
+        "expected_duration": horizon,
     }
     picks = [order[int(q * (paths - 1))] for q in (0.05, 0.2, 0.35, 0.5, 0.65, 0.8, 0.95)]
     sample_paths = [{"id": f"p{i}", "points": [round(float(x), 4) for x in equity[idx]]}
                     for i, idx in enumerate(picks)]
     median_path = [round(float(x), 4) for x in equity[order[paths // 2]]]
-    return {"stats": stats, "sample_paths": sample_paths, "median_path": median_path}
+    return {"stats": stats, "sample_paths": sample_paths, "median_path": median_path,
+            "tuning": tuning}
 
 
 @api.post("/strategies/{sid}/scan")

@@ -101,6 +101,20 @@ out-of-sample validation and market-regime detection.
 - DERIV_APP_ID stays numeric "1089" (public market-data WS). User's OAuth App ID 34zIy2UfIdAzHQNsLhUod
   saved as DERIV_OAUTH_APP_ID for future login features (not needed for market data).
 
+## Iteration — Smarter Mini Simulations (2026-06)
+- `/api/strategies/{sid}/simulate` upgraded for accuracy:
+  - **Block bootstrap** (streak-aware): samples contiguous runs of past trades so win/loss streaks,
+    drawdown and tail risk are realistic (vs naive IID shuffle).
+  - **Current-market tuning**: fetches live candles once, scales per-trade magnitude by current vs
+    reference volatility (clamped 0.6–1.6) and tilts drift by the live Market Outlook direction×confidence
+    (±0.4%/trade max). Falls back to untuned history if data unavailable (synthetic indices).
+  - New stats: `median_max_drawdown_pct` (worst dip), `prob_lose_half`, `expected_duration`
+    (avg_hold_ms × trades, humanized — Gold/indices ≈ weeks, crypto 5m ≈ hours). Returns a `tuning` block
+    (direction, confidence, vol_ratio, regime).
+- Frontend MiniSimulations.jsx: added Worst-dip + Chance-of-losing-half chips, horizon line, and a
+  "Tuned to current market" note. Dashboard stays at $20. Framing remains "rough preview, not advice".
+- Verified via curl (stats + tuning present) and screenshot (renders in dark/light).
+
 ## Known Caveats
 - Deriv market data (Gold, Volatility Indices, forex, stock indices) is UNREACHABLE from the
   Emergent builder/preview egress (Cloudflare HTTP 520). Deriv instruments still appear in the picker
