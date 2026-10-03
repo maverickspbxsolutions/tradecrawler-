@@ -35,6 +35,7 @@ export function PriceChart({ symbol, tf, onTfChange }) {
   });
 
   const closed = data?.candles || [];
+  const unavailable = data && data.available === false;
   const liveCandle = live.data?.candle || null;
 
   let display = closed;
@@ -55,7 +56,7 @@ export function PriceChart({ symbol, tf, onTfChange }) {
   const changePct = last != null && first ? ((last - first) / first) * 100 : null;
   const up = changePct != null && changePct >= 0;
 
-  const liveOk = !live.isError && live.data?.price != null;
+  const liveOk = !unavailable && !live.isError && live.data?.price != null;
   const ageSec = live.dataUpdatedAt ? Math.max(0, Math.round((now - live.dataUpdatedAt) / 1000)) : null;
 
   return (
@@ -79,7 +80,7 @@ export function PriceChart({ symbol, tf, onTfChange }) {
               style={{ background: liveOk ? "#00E676" : "#8A8A93", animation: liveOk ? "pulse 1.2s infinite" : "none" }}
             />
             <span style={{ color: liveOk ? "#00E676" : "#8A8A93" }}>
-              {liveOk ? `Live · ${ageSec ?? 0}s ago` : "Delayed"}
+              {liveOk ? `Live · ${ageSec ?? 0}s ago` : unavailable ? "Unavailable" : "Delayed"}
             </span>
           </span>
         </div>
@@ -97,7 +98,13 @@ export function PriceChart({ symbol, tf, onTfChange }) {
         </Select>
       </div>
       <div className="px-3 py-2">
-        <Candlestick candles={display} height={240} liveLast={hasLive} />
+        {unavailable && !display.length ? (
+          <div className="grid place-items-center text-xs text-muted-foreground font-mono text-center px-4" style={{ height: 240 }} data-testid="chart-unavailable">
+            {data?.reason || "Live data for this market is temporarily unavailable."}
+          </div>
+        ) : (
+          <Candlestick candles={display} height={240} liveLast={hasLive} />
+        )}
       </div>
     </div>
   );

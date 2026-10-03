@@ -61,6 +61,22 @@ DERIV_API_TOKEN = os.environ.get("DERIV_API_TOKEN")
 DERIV_WS = f"wss://ws.derivws.com/websockets/v3?app_id={DERIV_APP_ID}"
 _DERIV_PREFIXES = ("R_", "1HZ", "frx", "cry", "OTC_", "WLD", "JD", "stpRNG",
                    "BOOM", "CRASH", "RDBULL", "RDBEAR")
+
+
+class DerivUnavailable(RuntimeError):
+    """Deriv market data source is currently unreachable (expected in some networks)."""
+
+
+_deriv_block_until = 0.0
+
+
+def _deriv_blocked() -> bool:
+    return time.time() < _deriv_block_until
+
+
+def _block_deriv(seconds: int = 60):
+    global _deriv_block_until
+    _deriv_block_until = time.time() + seconds
 _deriv_sym_cache = {"t": 0, "list": None, "fail_t": 0}
 _deriv_symbol_set: set = set()
 
@@ -262,7 +278,14 @@ async def get_candles(symbol: str, timeframe: str, limit: int = 300, closed_only
         raise ValueError(f"Unsupported timeframe: {timeframe}")
 
     if _is_deriv_symbol(symbol):
-        return await _get_deriv_candles(symbol, timeframe, limit, closed_only)
+        if _deriv_blocked():
+            raise DerivUnavailable("Live data for this market is temporarily unavailable.")
+        try:
+            return await _get_deriv_candles(symbol, timeframe, limit, closed_only)
+        except Exception as e:  # noqa
+            _block_deriv(60)
+            logger.warning(f"Deriv candles failed for {symbol}: {e}")
+            raise DerivUnavailable("Live data for this market is temporarily unavailable.") from e
 
     key = f"{symbol.upper()}:{timeframe}:{limit}:{closed_only}"
     now = time.time()
@@ -319,13 +342,15 @@ async def get_live(symbol: str, timeframe: str):
     candle = None
     source = None
     if _is_deriv_symbol(symbol):
-        try:
-            rows = await asyncio.wait_for(
-                _get_deriv_candles(symbol, timeframe, 2, closed_only=False), 6)
-            if rows:
-                candle, source = rows[-1], "deriv"
-        except Exception as e:  # noqa
-            logger.warning(f"Deriv live fetch failed for {symbol}: {e}")
+        if not _deriv_blocked():
+            try:
+                rows = await asyncio.wait_for(
+                    _get_deriv_candles(symbol, timeframe, 2, closed_only=False), 6)
+                if rows:
+                    candle, source = rows[-1], "deriv"
+            except Exception as e:  # noqa
+                _block_deriv(60)
+                logger.warning(f"Deriv live fetch failed for {symbol}: {e}")
     else:
         for name, fetch in (("binance.us", _fetch_binance), ("coinbase", _fetch_coinbase)):
             try:

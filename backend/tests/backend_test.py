@@ -157,6 +157,74 @@ class TestMarket:
         for k in ["trend", "volatility", "strength"]:
             assert k in d
 
+    # ---------- Live price (near-real-time, 3s cache) ----------
+    def test_live_btc(self, client):
+        r = client.get(f"{API}/market/live?symbol=BTCUSDT&timeframe=1m", timeout=30)
+        assert r.status_code == 200, r.text
+        d = r.json()
+        assert d["price"] is not None and isinstance(d["price"], (int, float))
+        assert d["source"] == "binance.us"
+        c = d["candle"]
+        for k in ["o", "h", "l", "c", "t"]:
+            assert k in c, f"missing candle.{k}"
+        assert isinstance(d.get("server_ts"), int)
+
+    # ---------- Market outlook ----------
+    def test_outlook_btc(self, client):
+        r = client.get(f"{API}/market/outlook?symbol=BTCUSDT&timeframe=1h", timeout=60)
+        assert r.status_code == 200, r.text
+        d = r.json()
+        assert d["direction"] in ("Up", "Down", "Neutral")
+        assert isinstance(d["confidence"], int) and 0 <= d["confidence"] <= 100
+        assert isinstance(d["score"], int) and -100 <= d["score"] <= 100
+        assert isinstance(d["reasons"], list) and len(d["reasons"]) > 0
+        m = d["metrics"]
+        for k in ["rsi", "ema20", "ema50", "macd_hist", "trend_slope_pct", "volatility_label"]:
+            assert k in m, f"missing metrics.{k}"
+        assert isinstance(d.get("disclaimer"), str) and d["disclaimer"]
+
+    # ---------- Symbols: Binance + Deriv (fallback) ----------
+    def test_symbols_includes_binance_and_deriv(self, client):
+        r = client.get(f"{API}/market/symbols", timeout=30)
+        assert r.status_code == 200
+        d = r.json()
+        opts = d["options"]
+        srcs = {o["source"] for o in opts}
+        assert "binance" in srcs, "binance options missing"
+        assert "deriv" in srcs, "deriv options missing (fallback list should load)"
+        assert d["deriv_available"] is True
+        syms = {o["symbol"] for o in opts}
+        # required deriv instruments per spec
+        for req in ("frxXAUUSD", "cryBTCUSD", "R_10", "R_75", "R_100"):
+            assert req in syms, f"deriv symbol {req} missing from options"
+        # Binance crypto
+        assert "BTCUSDT" in syms
+        assert d["default"] == "BTCUSDT"
+
+    # ---------- Graceful degradation: Deriv unreachable ----------
+    # Note: the backend returns a proper JSON 502 with a clear detail message
+    # (e.g. "Could not load frxXAUUSD data: server rejected WebSocket connection: HTTP 520"),
+    # but Cloudflare rewrites origin 502s to its own HTML error page on the public URL.
+    # From the UI/API-consumer perspective the status code is still 502, which is the
+    # critical bit — the server did NOT crash with a 500 or leak a stack trace.
+    def test_candles_deriv_graceful_502(self, client):
+        r = client.get(f"{API}/market/candles?symbol=frxXAUUSD&timeframe=1h", timeout=30)
+        assert r.status_code == 502, f"expected 502 for unreachable Deriv, got {r.status_code}: {r.text[:200]}"
+        assert r.status_code != 500, "must not be a 500 stack trace"
+        # If the response is JSON (direct from backend), check the message.
+        try:
+            body = r.json()
+            detail = str(body.get("detail", ""))
+            assert detail, "502 JSON response must include a clear error message"
+        except ValueError:
+            # Cloudflare HTML 502 page — still acceptable (origin returned 502).
+            assert "502" in r.text or "Bad gateway" in r.text
+
+    def test_outlook_deriv_graceful_502(self, client):
+        r = client.get(f"{API}/market/outlook?symbol=frxXAUUSD&timeframe=1h", timeout=30)
+        assert r.status_code == 502, f"expected 502, got {r.status_code}: {r.text[:200]}"
+        assert r.status_code != 500
+
 
 # ---------- Settings / Alerts (Resend) ----------
 class TestSettingsAlerts:

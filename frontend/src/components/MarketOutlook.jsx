@@ -45,9 +45,9 @@ export function MarketOutlook({ symbol, tf }) {
       </div>
 
       <div className="p-4 space-y-3">
-        {isError ? (
+        {isError || (data && data.available === false) ? (
           <p className="text-xs text-muted-foreground" data-testid="outlook-error">
-            {error?.response?.data?.detail || "Market data unavailable for this instrument right now."}
+            {data?.reason || error?.response?.data?.detail || "Market data unavailable for this instrument right now."}
           </p>
         ) : isLoading || !data ? (
           <p className="text-xs text-muted-foreground font-mono">Reading the market…</p>

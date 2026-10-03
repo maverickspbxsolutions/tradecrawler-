@@ -1,0 +1,43 @@
+{
+  "summary": "Verified Deriv integration, live price, Market Outlook, and graceful 502 degradation on TradeCrawler. Backend pytest (7/7 TestMarket + 5/5 TestAuth) = 12/12 passed. Frontend: login works, dashboard renders, after selecting a Binance crypto strategy (MACD + Volume Confirm · SOLUSDT) the PriceChart header shows live price $119.58 with 'LIVE · 2s ago' and pulsing green dot (data-testid='live-indicator', 'price-last'), MarketOutlook (data-testid='market-outlook') renders direction 'Leaning Up', confidence 65% with bar, 4 metric chips (Trend Slope, RSI, MACD, Volatility) and 5 reasons. Changing timeframe via price-tf-select to 15m re-runs BOTH chart and outlook (shared tf — outlook flipped to 'Leaning Down' 30%, header shows '15m'). New Crawler dialog's symbol-combobox loads 254 options grouped by market and includes Deriv entries frxXAUUSD, cryBTCUSD, R_10, R_75, R_100 plus full Binance list; typing 'Gold' in symbol-search finds frxXAUUSD. Graceful degradation: /api/market/candles?symbol=frxXAUUSD&timeframe=1h and /api/market/outlook?symbol=frxXAUUSD&timeframe=1h both return HTTP 502 with a clear backend detail message ('Could not load frxXAUUSD data: server rejected WebSocket connection: HTTP 520'); Cloudflare rewrites the public-URL 502 body to its own HTML error page (origin status still 502 — no 500/crash). In the UI, selecting a Deriv-backed strategy (R_100) does NOT crash: the chart shows DELAYED/—/loading and MarketOutlook renders an error row (data-testid='outlook-error') instead of the panel. Only console noise: benign recharts width/height warnings.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/market/candles?symbol=frxXAUUSD, /api/market/outlook?symbol=frxXAUUSD", "issue": "Backend correctly returns 502 JSON ({\"detail\":\"Could not load … HTTP 520\"}) in ~5s, but Cloudflare rewrites it on the public URL to a text/html CF error page (origin status 502 preserved). From a UI standpoint the status code contract holds, however the frontend's fallback (error?.response?.data?.detail) ends up undefined so the Market Outlook error row shows a CF-sourced phrase. Consider either (a) returning 503 instead of 502 (CF rewrites 502/504 but passes 503 through), or (b) returning 200 with {\"available\": false, \"reason\": \"…\"} so the UI always has a clean machine-readable payload. Also consider negative-caching Deriv WS failures for ~60s to avoid the 5s open-timeout per request."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "Deriv instrument chart/outlook (e.g. strategy on R_100 or frxXAUUSD)", "issue": "When the backend 502 is rewritten by Cloudflare to its HTML 502 page, axios cannot find `error.response.data.detail`, so MarketOutlook's visible error text falls to the Cloudflare copy ('The origin web server returned an invalid or incomplete response to Cloudflare…') instead of the intended friendly fallback 'Market data unavailable for this instrument right now.' PriceChart gracefully degrades (LIVE indicator -> DELAYED, price '—', 'loading…' overlay) — no crash. Suggest switching the Deriv-unreachable response to 503 or a 200+flag so the UI shows the friendly fallback, or hard-coding the fallback copy whenever status === 502.", "affected_selectors": ["[data-testid=\"outlook-error\"]", "[data-testid=\"price-chart\"]"]}
+    ],
+    "design_issues": [
+      {"screen": "Dashboard price chart (initial mount)", "issues": ["Recharts width(-1)/height(-1) console warning (benign; chart renders correctly) — carried over from previous iterations."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Replace Cloudflare-rewritten 502 for Deriv failures with either HTTP 503 or a 200 response containing {available:false, reason} so the frontend's friendly fallback copy is always what the user sees (currently a Cloudflare phrase leaks into the Market Outlook error row).",
+    "Negative-cache Deriv WS failures server-side (~60s) so /api/market/candles and /api/market/outlook don't eat the ~5s open-timeout on every Deriv request — see routes.py get_candles / market_outlook paths.",
+    "(Carryover) In SymbolCombobox.jsx, show a 'Loading instruments…' row while useQuery is pending instead of the single-row BTCUSDT fallback — only matters on a cold /api/market/symbols cache."
+  ],
+  "critical_code_review_comments": [
+    "backend/routes.py L94-96: `market_outlook` catches generic Exception around `get_candles` only; if `compute_outlook` itself raised (e.g. pandas) the client would see a 500. Low-risk given 60-candle guard inside compute_outlook, but wrapping compute_outlook in a try/except → 502 would be safer.",
+    "backend/market_data.py L144-160 `_deriv_call`: opens a fresh WS on every call. Even with the 60s negative cache, each successful call still pays ~1 RTT for connect+authorize+send+recv. Consider a shared, reconnecting WS client with request/response correlation IDs for lower latency once Deriv is reachable.",
+    "frontend/MarketOutlook.jsx L49-51: fallback copy is only used when `error.response.data.detail` is undefined; when the server returns HTML (CF-rewritten 502) axios stores the HTML string as `data`, so `data?.detail` is undefined → fallback should trigger. The screenshot showed CF copy instead, which indicates `.detail` was set — worth logging `error.response` once in dev to confirm.",
+    "backend/routes.py `GET /api/market/symbols` (L45-69) still blocks on Deriv on a cold cache. The 60s negative cache in market_data.get_deriv_symbols helps subsequent requests, but the first dialog-open after a pod restart is still ~5s (noted in iteration_6)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py"
+  ],
+  "success_rate": {"backend": "100% (12/12 pytest incl. 7 new TestMarket cases)", "frontend": "100% of requested flows verified; 1 UX leak noted on Deriv error path"},
+  "test_credentials": "xambiep90 / Reddestroad1$ (works)",
+  "seed_data_creation": "None — did not create strategies this iteration; used existing seeded strategies (MACD + Volume Confirm SOLUSDT selected for live/outlook verification).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "On the public URL (Cloudflare), a backend HTTPException(502) response body is REPLACED by Cloudflare's own HTML 502 page while preserving the 502 status. Localhost (http://localhost:8001) still returns the clean JSON {detail: '…'}. If testing Deriv graceful 502s, assert on status_code only (as backend_test.py now does). The seeded strategy named '100 Index' uses symbol R_100 (Deriv) and will show the Deriv-unreachable UI by default on first dashboard load — switch to a crypto strategy (MACD + Volume Confirm · SOLUSDT, EMA 9/21 Crossover · ETHUSDT, or RSI Mean Reversion · BTCUSDT) to verify live price and outlook work. All new data-testids verified: live-indicator, price-last, price-tf-select, market-outlook, outlook-direction, outlook-confidence, outlook-confidence-bar, outlook-reasons, outlook-chip-*, outlook-error.",
+  "rca of the issue": "The one UX leak (Cloudflare copy appearing inside the Market Outlook error row for Deriv instruments) stems from Cloudflare's default policy of rewriting origin 5xx responses — specifically 502/504 — into its own HTML error page. The FastAPI route correctly raises HTTPException(502) with a clear `detail`, confirmed via a direct localhost curl: `{\"detail\":\"Could not load frxXAUUSD data: server rejected WebSocket connection: HTTP 520\"}`. On the public URL that JSON body is replaced by CF's HTML (status 502 preserved), so axios in MarketOutlook.jsx receives an HTML string in `error.response.data` and the UI shows CF-authored text instead of the friendly fallback. Fix: either (a) switch Deriv-unreachable responses to a status Cloudflare passes through verbatim (e.g. 503), or (b) return 200 with `{available:false, reason}` and branch in the UI."
+}

@@ -51,7 +51,35 @@ out-of-sample validation and market-regime detection.
 - Mini Simulations panel (Monte-Carlo of $20 over next 20 trades) below Trade Alerts.
 - Deployment-readiness scan passed (fixed N+1 in /api/strategies).
 
+## Iteration — Live data + Market Outlook (2026-06, this fork)
+- Real-time charts: PriceChart now polls `/api/market/live` every 5s and overlays the in-progress
+  (forming) candle on top of closed candles; header shows live price + "Live · Xs ago" pulsing
+  indicator. Closed candles still drive signals (no repaint/lookahead risk).
+  Backend `get_live()` (market_data.py) = current price + forming candle, 3s TTL cache.
+- Market Outlook prediction: new `backend/outlook.py` `compute_outlook()` + `GET /api/market/outlook`.
+  Multi-indicator confluence (trend structure EMA20/50, trend slope, RSI momentum, MACD momentum,
+  recent drift, volatility regime) → direction Up/Down/Neutral + confidence% + bias score + plain-English
+  reasons. Frontend `MarketOutlook.jsx` panel below the chart; shares timeframe with the chart
+  (tf lifted into Dashboard). Framed as probabilistic read, NOT a guarantee / not advice.
+- Deriv dropdown ALWAYS populated: `DERIV_FALLBACK_SYMBOLS` static list (Gold, metals, Deriv crypto,
+  Volatility 10/25/50/75/100 + (1s), Boom/Crash, Step, Jump, Bear/Bull, forex majors, stock indices).
+  `/api/market/symbols` returns ~254 options (Binance crypto + 52 Deriv), Gold/BTC/Volatility ranked first.
+- Graceful Deriv degradation: Deriv WS is UNREACHABLE from Emergent egress (Cloudflare HTTP 520).
+  `/api/market/candles`, `/api/market/live`, `/api/market/outlook` now return **HTTP 200 with
+  `{available:false, reason}`** (NOT 502) when the Deriv source is down, so Cloudflare can't rewrite
+  the body into its own error page. UI shows friendly "Live data for this market is temporarily
+  unavailable." (chart + outlook) and header reads "Unavailable". `DerivUnavailable` exception +
+  60s negative-cache block so Deriv requests don't each eat the ~5s WS open-timeout (repeats ~0.15s).
+- Tested: iteration_7.json — backend 12/12 pytest; all frontend flows + graceful degradation verified.
+
 ## Known Caveats
+- Deriv market data (Gold, Volatility Indices, forex, stock indices) is UNREACHABLE from the
+  Emergent builder/preview egress (Cloudflare HTTP 520). Deriv instruments still appear in the picker
+  (static fallback) and the app degrades gracefully. Deriv candles/outlook should start working from
+  a deployed runtime with different network egress — validate `active_symbols` + candles for
+  frxXAUUSD, cryBTCUSD and R_100 after deploy. A numeric Deriv app_id (not a pat_ token) may be needed.
+- For SPOT crypto (BTC/ETH/etc.), Binance.US is the more accurate real-market source; Deriv crypto is
+  a CFD/synthetic feed. Crypto live price + Market Outlook are fully working now.
 - Resend sender defaults to `onboarding@resend.dev` (RESEND_FROM_EMAIL). To deliver to any
   inbox, the user must verify a domain in Resend and set RESEND_FROM_EMAIL to that domain address.
 - SMS (Twilio) intentionally deferred; settings/architecture ready (sms_enabled flag).

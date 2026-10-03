@@ -74,9 +74,12 @@ async def candles(symbol: str = "BTCUSDT", timeframe: str = "1h", limit: int = 3
     limit = max(50, min(limit, 1000))
     try:
         data = await md.get_candles(symbol, timeframe, limit)
+    except md.DerivUnavailable as e:
+        return {"symbol": symbol, "timeframe": timeframe, "candles": [],
+                "available": False, "reason": str(e)}
     except Exception as e:  # noqa
         raise HTTPException(502, f"Could not load {symbol} data: {e}")
-    return {"symbol": symbol, "timeframe": timeframe, "candles": data}
+    return {"symbol": symbol, "timeframe": timeframe, "candles": data, "available": True}
 
 
 @api.get("/market/live")
@@ -84,16 +87,24 @@ async def market_live(symbol: str = "BTCUSDT", timeframe: str = "1h"):
     try:
         return await md.get_live(symbol, timeframe)
     except Exception as e:  # noqa
-        raise HTTPException(502, f"Could not load live {symbol}: {e}")
+        return {"symbol": symbol, "timeframe": timeframe, "price": None,
+                "candle": None, "source": None, "available": False, "reason": str(e)}
 
 
 @api.get("/market/outlook")
 async def market_outlook(symbol: str = "BTCUSDT", timeframe: str = "1h"):
     try:
         candles = await md.get_candles(symbol, timeframe, 300)
+    except md.DerivUnavailable as e:
+        return {"symbol": symbol, "timeframe": timeframe, "direction": "Neutral",
+                "confidence": 0, "score": 0, "metrics": {}, "reasons": [],
+                "available": False, "reason": str(e),
+                "disclaimer": "Market data unavailable for this instrument right now."}
     except Exception as e:  # noqa
         raise HTTPException(502, f"Could not load {symbol} data: {e}")
-    return compute_outlook(candles, symbol, timeframe)
+    result = compute_outlook(candles, symbol, timeframe)
+    result["available"] = True
+    return result
 
 
 @api.get("/market/health")
