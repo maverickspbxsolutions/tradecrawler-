@@ -42,6 +42,15 @@ out-of-sample validation and market-regime detection.
 - Dashboard: candlestick chart + timeframe selector, stats, signal feed, strategy cards,
   backtest panel, paper panel, evolution panel, settings, searchable all-crypto combobox.
 
+## Iterations (post-MVP)
+- TradeCrawler rebrand; beginner plain-English UI + tooltips + "How it works" card.
+- Direct Resend (user's own key, independent of Emergent); multi-recipient alerts; $20 trade-plan emails.
+- Autonomous 24/7: alerts auto-fire the moment a strategy proves its edge (no manual go-live); 30s poll.
+- All 202 Binance.US USDT pairs selectable (searchable combobox), BTC default.
+- Light/Dark theme toggle (next-themes).
+- Mini Simulations panel (Monte-Carlo of $20 over next 20 trades) below Trade Alerts.
+- Deployment-readiness scan passed (fixed N+1 in /api/strategies).
+
 ## Known Caveats
 - Resend sender defaults to `onboarding@resend.dev` (RESEND_FROM_EMAIL). To deliver to any
   inbox, the user must verify a domain in Resend and set RESEND_FROM_EMAIL to that domain address.
