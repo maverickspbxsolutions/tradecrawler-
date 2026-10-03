@@ -32,7 +32,7 @@ export function PaperPanel({ strategy }) {
     <div className="border border-border/40 bg-card rounded-sm" data-testid="paper-panel">
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-border/40">
         <div className="text-xs font-mono uppercase tracking-[0.15em] text-muted-foreground flex items-center gap-2">
-          <Wallet className="h-3.5 w-3.5" /> Paper Trading · {strategy?.name || "—"}
+          <Wallet className="h-3.5 w-3.5" /> Live practice · no real money · {strategy?.name || "—"}
         </div>
         <span
           className={`text-[10px] font-mono uppercase px-2 py-0.5 rounded-sm border ${

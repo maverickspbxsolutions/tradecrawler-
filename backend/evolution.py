@@ -226,7 +226,8 @@ async def evolve_strategy(strategy: dict) -> dict:
             full["strategy_id"] = strategy["id"]
             full["ran_at"] = datetime.now(timezone.utc).isoformat()
             await db.backtests.replace_one({"strategy_id": strategy["id"]}, full, upsert=True)
-            new_live = strategy.get("live", False) and full["gate_passed"]
+            new = apply_genome(strategy, candidate)
+            new_live = full["gate_passed"]  # autonomous: alerts follow proven edge
             await db.strategies.update_one(
                 {"id": strategy["id"]},
                 {"$set": {"gate_passed": full["gate_passed"], "live": new_live}})

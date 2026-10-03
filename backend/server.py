@@ -87,7 +87,8 @@ async def bootstrap_engine():
                     result["ran_at"] = datetime.now(timezone.utc).isoformat()
                     await db.backtests.replace_one({"strategy_id": s["id"]}, result, upsert=True)
                     await db.strategies.update_one(
-                        {"id": s["id"]}, {"$set": {"gate_passed": result["gate_passed"]}})
+                        {"id": s["id"]}, {"$set": {"gate_passed": result["gate_passed"],
+                                                    "live": result["gate_passed"]}})
             if await db.evolutions.count_documents({"strategy_id": s["id"]}) == 0:
                 fresh = await db.strategies.find_one({"id": s["id"]}, {"_id": 0})
                 await evolve_strategy(fresh)
@@ -104,6 +105,10 @@ async def on_startup():
     await db.paper_states.create_index("strategy_id", unique=True)
     await seed_admin()
     await seed_defaults()
+    # autonomy reconcile: alerts follow proven edge; default auto-improve on
+    await db.strategies.update_many({"auto_evolve": {"$exists": False}}, {"$set": {"auto_evolve": True}})
+    await db.strategies.update_many({"gate_passed": True}, {"$set": {"live": True}})
+    await db.strategies.update_many({"gate_passed": {"$ne": True}}, {"$set": {"live": False}})
     asyncio.create_task(bootstrap_engine())
     start_scheduler()
     logger.info("Crypto Signal Terminal backend started")

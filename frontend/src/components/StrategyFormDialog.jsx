@@ -206,7 +206,7 @@ export function StrategyFormDialog({ open, onOpenChange, strategy }) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl rounded-sm max-h-[88vh] overflow-y-auto" data-testid="strategy-form">
         <DialogHeader>
-          <DialogTitle className="text-base">{editing ? "Edit Strategy" : "New Strategy"}</DialogTitle>
+          <DialogTitle className="text-base">{editing ? "Edit Crawler" : "New Crawler"}</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4">
@@ -227,14 +227,14 @@ export function StrategyFormDialog({ open, onOpenChange, strategy }) {
             </div>
           </div>
 
-          <RuleSection title="Entry (Buy) Rules" rules={form.entry_rules} setRules={(r) => set("entry_rules", r)} kind="entry" />
-          <RuleSection title="Exit (Sell) Rules" rules={form.exit_rules} setRules={(r) => set("exit_rules", r)} kind="exit" />
+          <RuleSection title="When to BUY" rules={form.entry_rules} setRules={(r) => set("entry_rules", r)} kind="entry" />
+          <RuleSection title="When to SELL" rules={form.exit_rules} setRules={(r) => set("exit_rules", r)} kind="exit" />
         </div>
 
         <DialogFooter>
           <Button variant="ghost" className="rounded-sm" onClick={() => onOpenChange(false)}>Cancel</Button>
           <Button className="rounded-sm bg-primary text-primary-foreground hover:bg-primary/90" onClick={submit} disabled={save.isPending} data-testid="save-strategy-btn">
-            {editing ? "Save Changes" : "Create Strategy"}
+            {editing ? "Save Changes" : "Create Crawler"}
           </Button>
         </DialogFooter>
       </DialogContent>

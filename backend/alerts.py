@@ -95,9 +95,10 @@ def _assert_safe_email(subject: str, html: str) -> None:
                 raise ValueError(f"Anchor text {m.group(1)!r} != real link host {real!r} (G3)")
 
 
-async def send_email(*, to: str, subject: str, html: str) -> str | None:
+async def send_email(*, to, subject: str, html: str) -> str | None:
     _assert_safe_email(subject, html)
-    payload = {"from": EMAIL_FROM, "to": [to], "subject": subject, "html": html}
+    recipients = to if isinstance(to, list) else [to]
+    payload = {"from": EMAIL_FROM, "to": recipients, "subject": subject, "html": html}
     if EMAIL_REPLY_TO:
         payload["reply_to"] = EMAIL_REPLY_TO
     async with httpx.AsyncClient(timeout=30) as client:
@@ -114,19 +115,43 @@ def _signal_html(signal: dict, strategy_name: str) -> str:
     side = signal["side"]
     color = "#00E676" if side == "BUY" else "#FF3366"
     price = signal.get("price", 0)
+    coin = signal["symbol"].replace("USDT", "")
+    plan = signal.get("plan") or {}
+
+    if side == "BUY":
+        plan_html = (
+            f'<p style="font-size:16px;margin:14px 0 4px">What to do now:</p>'
+            f'<p style="font-size:15px;margin:2px 0">Buy about <strong>${plan.get("capital",20):.0f}</strong> '
+            f'of {escape(coin)} at around <strong>${price:,.4f}</strong>.</p>'
+            f'<p style="font-size:15px;margin:2px 0">Goal: sell near <strong>${plan.get("target_price",0):,.4f}</strong> '
+            f'(about +{plan.get("target_pct",0)}%) &rarr; roughly '
+            f'<strong style="color:#00E676">+${plan.get("est_profit",0)}</strong> profit on your ${plan.get("capital",20):.0f}.</p>'
+            f'<p style="font-size:15px;margin:2px 0">Safety: if it falls near <strong>${plan.get("stop_price",0):,.4f}</strong> '
+            f'(about {plan.get("stop_pct",0)}%), consider selling to limit the loss '
+            f'(about ${plan.get("est_loss",0)}).</p>'
+            f'<p style="font-size:13px;color:#8A8A93;margin-top:8px">The bot will email you again when it\'s time to sell.</p>'
+        )
+    else:
+        pnl = signal.get("pnl")
+        pnl_line = (f' Your simulated trade result: <strong style="color:{"#00E676" if (pnl or 0)>=0 else "#FF3366"}">'
+                    f'${pnl}</strong>.' if pnl is not None else "")
+        plan_html = (
+            f'<p style="font-size:16px;margin:14px 0 4px">What to do now:</p>'
+            f'<p style="font-size:15px;margin:2px 0">Time to <strong>sell</strong> your {escape(coin)} position, '
+            f'around <strong>${price:,.4f}</strong>.{pnl_line}</p>'
+        )
+
     return (
         f'<table role="presentation" width="100%" style="background:#0A0A0C;padding:24px">'
         f'<tr><td style="font-family:Arial,sans-serif;color:#EDEDED">'
         f'<p style="font-size:12px;letter-spacing:2px;color:#8A8A93;text-transform:uppercase">'
-        f'{escape(EMAIL_FROM_NAME)} &middot; Signal Alert</p>'
-        f'<h1 style="color:{color};margin:8px 0;font-size:28px">{escape(side)} {escape(signal["symbol"])}</h1>'
-        f'<p style="font-size:16px">Strategy: <strong>{escape(strategy_name)}</strong></p>'
-        f'<p style="font-size:16px">Price: <strong>${price:,.4f}</strong> &middot; Timeframe: {escape(signal.get("timeframe",""))}</p>'
-        f'<p style="font-size:14px;color:#8A8A93">Reason: {escape(signal.get("reason",""))}</p>'
-        f'<p style="font-size:14px;color:#8A8A93">Candle: {escape(str(signal.get("candle_time","")))}</p>'
+        f'{escape(EMAIL_FROM_NAME)} &middot; Trade Alert</p>'
+        f'<h1 style="color:{color};margin:8px 0;font-size:30px">{escape(side)} {escape(coin)}</h1>'
+        f'<p style="font-size:14px;color:#8A8A93;margin:0">From bot: {escape(strategy_name)} &middot; {escape(signal.get("timeframe",""))} chart</p>'
+        f'{plan_html}'
         f'<div style="background:#FFE600;color:#000;padding:10px;font-size:11px;'
-        f'font-weight:bold;letter-spacing:1px;margin-top:16px;text-align:center">'
-        f'SIGNALS ARE NOT FINANCIAL ADVICE. PAPER-TRADING ONLY, NO ORDERS PLACED.</div>'
+        f'font-weight:bold;letter-spacing:1px;margin-top:18px;text-align:center">'
+        f'NOT FINANCIAL ADVICE. THIS IS A SUGGESTION ONLY &mdash; THE BOT PLACES NO ORDERS. TRADE AT YOUR OWN RISK.</div>'
         f'<p style="font-size:11px;color:#565660;margin-top:16px">Sent by {escape(EMAIL_FROM_NAME)}. '
         f'We never ask for your password or payment details by email.</p>'
         f'</td></tr></table>'
@@ -138,7 +163,7 @@ async def get_settings() -> dict:
     if not s:
         s = {
             "id": "global",
-            "alert_email": "",
+            "alert_emails": [],
             "email_enabled": True,
             "sms_enabled": False,
             "max_alerts_per_hour": 10,
@@ -146,19 +171,33 @@ async def get_settings() -> dict:
             "min_minutes_between_same_strategy": 15,
         }
         await db.settings.insert_one(dict(s))
+        return s
+    # migrate single alert_email -> alert_emails list
+    if "alert_emails" not in s:
+        legacy = [s["alert_email"]] if s.get("alert_email") else []
+        s["alert_emails"] = legacy
+        await db.settings.update_one({"id": "global"}, {"$set": {"alert_emails": legacy}})
     return s
+
+
+def _recipients(settings: dict) -> list:
+    emails = settings.get("alert_emails") or []
+    if not emails and settings.get("alert_email"):
+        emails = [settings["alert_email"]]
+    return [e.strip() for e in emails if e and e.strip()]
 
 
 async def maybe_send_alert(signal: dict, strategy: dict) -> dict:
     """Apply gating, dedup and rate-limits. Returns dict describing what happened."""
     result = {"emailed": False, "reason": None}
     settings = await get_settings()
+    recipients = _recipients(settings)
 
-    if not strategy.get("live") or not strategy.get("gate_passed"):
-        result["reason"] = "strategy not live / gate not passed"
+    if not strategy.get("gate_passed"):
+        result["reason"] = "edge not proven yet (bot still testing)"
         return result
-    if not settings.get("email_enabled") or not settings.get("alert_email"):
-        result["reason"] = "email disabled or no recipient set"
+    if not settings.get("email_enabled") or not recipients:
+        result["reason"] = "email disabled or no recipients set"
         return result
 
     now = datetime.now(timezone.utc)
@@ -195,13 +234,13 @@ async def maybe_send_alert(signal: dict, strategy: dict) -> dict:
     try:
         subject = f"[{signal['side']}] {signal['symbol']} - {strategy['name']}"
         html = _signal_html(signal, strategy["name"])
-        email_id = await send_email(to=settings["alert_email"], subject=subject, html=html)
+        email_id = await send_email(to=recipients, subject=subject, html=html)
         await db.alerts.insert_one({
             "idempotency_key": signal["sig_key"],
             "strategy_id": strategy["id"],
             "signal_id": signal.get("id"),
             "channel": "email",
-            "to": settings["alert_email"],
+            "to": recipients,
             "email_id": email_id,
             "sent_at": now.isoformat(),
         })

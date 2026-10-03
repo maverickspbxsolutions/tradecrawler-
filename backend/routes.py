@@ -20,6 +20,25 @@ from evolution import evolve_strategy, detect_regime
 api = APIRouter(prefix="/api", dependencies=[Depends(get_current_user)])
 
 
+async def _auto_evaluate(sid: str):
+    """Background: backtest a strategy and auto-enable alerts if its edge is proven."""
+    s = await db.strategies.find_one({"id": sid}, {"_id": 0})
+    if not s:
+        return
+    try:
+        candles = await md.get_candles(s["symbol"], s["timeframe"], 500)
+        result = run_backtest(candles, s)
+        if "error" in result:
+            return
+        result["strategy_id"] = sid
+        result["ran_at"] = datetime.now(timezone.utc).isoformat()
+        await db.backtests.replace_one({"strategy_id": sid}, result, upsert=True)
+        await db.strategies.update_one(
+            {"id": sid}, {"$set": {"gate_passed": result["gate_passed"], "live": result["gate_passed"]}})
+    except Exception:  # noqa
+        pass
+
+
 # ---------------- Market ----------------
 @api.get("/market/symbols")
 async def symbols():
@@ -66,6 +85,7 @@ async def create_strategy(body: StrategyCreate):
     strat = Strategy(**body.model_dump())
     await db.strategies.insert_one(strat.model_dump())
     asyncio.create_task(backfill_signals(strat.model_dump()))
+    asyncio.create_task(_auto_evaluate(strat.id))
     return strat.model_dump()
 
 
@@ -121,10 +141,9 @@ async def backtest_strategy(sid: str, body: BacktestInput):
     result["strategy_id"] = sid
     result["ran_at"] = datetime.now(timezone.utc).isoformat()
     await db.backtests.replace_one({"strategy_id": sid}, result, upsert=True)
-    # gate: update strategy; if gate fails, force live off
-    new_live = s.get("live", False) and result["gate_passed"]
+    # autonomous: auto-enable alerts the moment the edge is proven; disable if it drops
     await db.strategies.update_one(
-        {"id": sid}, {"$set": {"gate_passed": result["gate_passed"], "live": new_live}})
+        {"id": sid}, {"$set": {"gate_passed": result["gate_passed"], "live": result["gate_passed"]}})
     return result
 
 
@@ -248,6 +267,7 @@ async def overview():
         "num_strategies": len(strats),
         "num_enabled": len(enabled),
         "num_live": len(live),
+        "trade_capital": 20.0,
         "signals_today": signals_today,
         "alerts_today": alerts_today,
         "total_paper_pnl": round(total_pnl, 2),
@@ -261,7 +281,7 @@ async def overview():
 
 # ---------------- Settings & alerts ----------------
 class SettingsInput(BaseModel):
-    alert_email: Optional[str] = None
+    alert_emails: Optional[list] = None
     email_enabled: Optional[bool] = None
     sms_enabled: Optional[bool] = None
     max_alerts_per_hour: Optional[int] = None
@@ -286,22 +306,24 @@ async def update_settings(body: SettingsInput):
 @api.post("/alerts/test")
 async def test_alert():
     s = await get_settings()
-    if not s.get("alert_email"):
-        raise HTTPException(400, "Set an alert email first")
+    recipients = [e.strip() for e in (s.get("alert_emails") or []) if e and e.strip()]
+    if not recipients:
+        raise HTTPException(400, "Add at least one email first")
     html = (
         f'<table role="presentation" width="100%" style="background:#0A0A0C;padding:24px">'
         f'<tr><td style="font-family:Arial,sans-serif;color:#EDEDED">'
-        f'<h1 style="color:#00E5FF">Test alert from {EMAIL_FROM_NAME}</h1>'
-        f'<p>Your email alerts are configured correctly.</p>'
+        f'<h1 style="color:#00E5FF">TradeCrawler is watching 🕷️</h1>'
+        f'<p>Your email alerts are set up correctly. When TradeCrawler spots a good '
+        f'~$20 trade, it will email you right here, 24/7 — with exactly what to do.</p>'
         f'<div style="background:#FFE600;color:#000;padding:10px;font-size:11px;'
         f'font-weight:bold;text-align:center;margin-top:12px">'
-        f'SIGNALS ARE NOT FINANCIAL ADVICE. PAPER-TRADING ONLY.</div>'
+        f'NOT FINANCIAL ADVICE. SUGGESTIONS ONLY &mdash; NO ORDERS ARE PLACED.</div>'
         f'</td></tr></table>')
     try:
-        email_id = await send_email(to=s["alert_email"], subject=f"{EMAIL_FROM_NAME} test alert", html=html)
+        email_id = await send_email(to=recipients, subject="TradeCrawler test alert", html=html)
     except Exception as e:  # noqa
         raise HTTPException(502, f"Email failed: {e}")
-    return {"sent": True, "email_id": email_id}
+    return {"sent": True, "email_id": email_id, "recipients": recipients}
 
 
 @api.get("/alerts")

@@ -13,6 +13,35 @@ from alerts import maybe_send_alert
 logger = logging.getLogger(__name__)
 
 PAPER_CAPITAL = 10000.0
+TRADE_CAPITAL = 20.0  # assume the trader can act on ~$20 the moment the email lands
+
+
+async def _trade_plan(strategy: dict, side: str, price: float) -> dict:
+    """Plain-English, dollar-concrete plan assuming ~$20 ready to trade."""
+    cap = TRADE_CAPITAL
+    if side != "BUY":
+        return {"action": "SELL", "capital": cap, "entry": round(price, 6)}
+    bt = await db.backtests.find_one(
+        {"strategy_id": strategy["id"]}, {"_id": 0, "avg_win_pct": 1, "avg_loss_pct": 1})
+    aw = (bt or {}).get("avg_win_pct") or 2.5
+    al = (bt or {}).get("avg_loss_pct") or -1.5
+    if aw <= 0:
+        aw = 2.5
+    if al >= 0:
+        al = -1.5
+    units = cap / price if price else 0
+    return {
+        "action": "BUY",
+        "capital": cap,
+        "units": round(units, 8),
+        "entry": round(price, 6),
+        "target_price": round(price * (1 + aw / 100), 6),
+        "stop_price": round(price * (1 + al / 100), 6),
+        "target_pct": round(aw, 2),
+        "stop_pct": round(al, 2),
+        "est_profit": round(cap * aw / 100, 2),
+        "est_loss": round(cap * al / 100, 2),
+    }
 
 
 async def _get_state(strategy_id: str) -> dict:
@@ -97,6 +126,7 @@ async def run_strategy_step(strategy: dict, source: str = "poll") -> dict | None
         "source": source,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
+    signal["plan"] = await _trade_plan(strategy, side, price)
 
     # update paper position
     if side == "BUY":

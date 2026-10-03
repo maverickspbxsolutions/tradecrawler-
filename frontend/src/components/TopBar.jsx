@@ -23,9 +23,9 @@ export function TopBar({ onOpenSettings }) {
             <Activity className="h-4 w-4 text-primary" />
           </div>
           <div className="leading-tight">
-            <div className="text-sm font-semibold tracking-tight">Signal Terminal</div>
+            <div className="text-sm font-semibold tracking-tight">TradeCrawler</div>
             <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-muted-foreground">
-              Crypto · alerts-only
+              crypto trade alerts
             </div>
           </div>
         </div>
@@ -39,7 +39,7 @@ export function TopBar({ onOpenSettings }) {
               className={`flex items-center gap-1.5 ${stale ? "text-sell" : "text-buy"}`}
               data-testid="engine-status"
             >
-              <Radio className="h-3 w-3" /> {stale ? "data stale" : "engine live"}
+              <Radio className="h-3 w-3" /> {stale ? "data delayed" : "watching 24/7"}
             </span>
           </div>
           <Button

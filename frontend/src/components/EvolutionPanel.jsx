@@ -61,8 +61,8 @@ export function EvolutionPanel({ strategy }) {
       qc.invalidateQueries({ queryKey: ["backtest", sid] });
       const d = r.data;
       toast[d.applied ? "success" : "message"](
-        d.applied ? "Evolved & applied an improved config" : d.improved ? "Found improvement (not auto-applied)" : "Current config still best out-of-sample",
-        { description: `OOS fitness ${d.current_oos_fitness} → ${d.candidate_oos_fitness}` }
+        d.applied ? "Upgraded! Found better settings and switched to them" : d.improved ? "Found better settings — turn on Auto-improve to use them" : "Current settings are still the best",
+        { description: `Out-of-sample score ${d.current_oos_fitness} → ${d.candidate_oos_fitness}` }
       );
     },
     onError: (e) => toast.error(e.response?.data?.detail || "Evolution failed"),
@@ -81,11 +81,11 @@ export function EvolutionPanel({ strategy }) {
     <div className="border border-border/40 bg-card rounded-sm" data-testid="evolution-panel">
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-border/40 flex-wrap gap-2">
         <div className="text-xs font-mono uppercase tracking-[0.15em] text-muted-foreground flex items-center gap-2">
-          <Dna className="h-3.5 w-3.5 text-primary" /> Adaptive Evolution · {strategy?.name || "—"}
+          <Dna className="h-3.5 w-3.5 text-primary" /> Self-improving · {strategy?.name || "—"}
         </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-1.5">
-            <span className="text-[9px] font-mono uppercase text-muted-foreground">Auto-evolve</span>
+            <span className="text-[9px] font-mono uppercase text-muted-foreground">Auto-improve</span>
             <Switch
               checked={strategy?.auto_evolve ?? true}
               onCheckedChange={(v) => toggleAuto.mutate(v)}
@@ -100,14 +100,14 @@ export function EvolutionPanel({ strategy }) {
             data-testid="evolve-now-btn"
           >
             {evolveNow.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Dna className="h-3.5 w-3.5 mr-1" />}
-            Evolve Now
+            Improve Now
           </Button>
         </div>
       </div>
 
       {!latest ? (
         <div className="h-[300px] grid place-items-center text-xs text-muted-foreground font-mono px-6 text-center">
-          {evolveNow.isPending ? "Running walk-forward genetic search…" : "Not evolved yet — run it. The engine mutates parameters, scores them on in-sample data, then validates out-of-sample."}
+          {evolveNow.isPending ? "Trying out new settings and keeping what works…" : "Tap “Improve now” and TradeCrawler will test lots of new settings, then keep the ones that work better on data it hasn't seen."}
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 p-4">
@@ -142,10 +142,10 @@ export function EvolutionPanel({ strategy }) {
             >
               {latest.applied ? <CheckCircle2 className="h-3.5 w-3.5" /> : <CircleSlash className="h-3.5 w-3.5" />}
               {latest.applied
-                ? "Improved config auto-applied (beat current out-of-sample)"
+                ? "Upgraded — found better settings and switched to them"
                 : latest.improved
-                ? "Improvement found — auto-evolve off, not applied"
-                : "Current config held up best out-of-sample"}
+                ? "Found better settings — turn on Auto-improve to use them"
+                : "Current settings are still the best"}
             </div>
 
             <div className="grid grid-cols-3 gap-2">
@@ -191,7 +191,7 @@ export function EvolutionPanel({ strategy }) {
             )}
 
             <div className="text-[10px] text-muted-foreground font-mono leading-relaxed pt-1">
-              Walk-forward: optimized on in-sample, validated out-of-sample. Adaptive optimization with honest OOS gating — not a predictor. Runs daily in the background.
+              TradeCrawler tests new settings on old data, then double-checks them on data it hasn't seen before keeping them. It only upgrades when the new settings truly do better. Runs automatically every day.
             </div>
           </div>
         </div>

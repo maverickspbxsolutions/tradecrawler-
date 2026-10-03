@@ -38,12 +38,12 @@ export default function Login() {
         <img src={HERO} alt="" className="absolute inset-0 h-full w-full object-cover opacity-60" />
         <div className="absolute inset-0 bg-gradient-to-t from-background via-background/40 to-transparent" />
         <div className="absolute bottom-0 left-0 p-10">
-          <div className="text-xs font-mono uppercase tracking-[0.25em] text-primary mb-3">Crypto · alerts-only</div>
+          <div className="text-xs font-mono uppercase tracking-[0.25em] text-primary mb-3">crypto trade alerts · 24/7</div>
           <h1 className="text-4xl font-semibold tracking-tight leading-tight max-w-md">
-            A disciplined signal engine.<br />Not a predictor.
+            TradeCrawler finds the trade.<br />You just check your email.
           </h1>
           <p className="text-sm text-muted-foreground mt-4 max-w-sm leading-relaxed">
-            Rule-based signals, honest backtests with fees &amp; slippage, and live paper-trading before anything goes live.
+            It watches crypto around the clock and emails you a simple plan — what to buy for about $20, and when to sell. No charts to read, no guessing.
           </p>
         </div>
       </div>
@@ -55,8 +55,8 @@ export default function Login() {
               <Activity className="h-5 w-5 text-primary" />
             </div>
             <div>
-              <div className="text-lg font-semibold tracking-tight">Signal Terminal</div>
-              <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-muted-foreground">Secure sign in</div>
+              <div className="text-lg font-semibold tracking-tight">TradeCrawler</div>
+              <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-muted-foreground">Sign in to your crawler</div>
             </div>
           </div>
 
@@ -100,7 +100,7 @@ export default function Login() {
           </div>
 
           <p className="text-[10px] text-muted-foreground font-mono mt-6 leading-relaxed">
-            Signals are not financial advice. This tool places no orders and connects to no trading account.
+            TradeCrawler sends suggestions only — not financial advice. It places no orders and never touches a trading account.
           </p>
         </form>
       </div>

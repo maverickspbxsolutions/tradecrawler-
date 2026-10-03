@@ -50,7 +50,7 @@ export function BacktestPanel({ strategy }) {
     <div className="border border-border/40 bg-card rounded-sm" data-testid="backtest-panel">
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-border/40">
         <div className="text-xs font-mono uppercase tracking-[0.15em] text-muted-foreground flex items-center gap-2">
-          <TrendingUp className="h-3.5 w-3.5" /> Backtest · {strategy?.name || "—"}
+          <TrendingUp className="h-3.5 w-3.5" /> Past performance · {strategy?.name || "—"}
         </div>
         <Button
           size="sm"
@@ -61,13 +61,13 @@ export function BacktestPanel({ strategy }) {
           data-testid="run-backtest-btn"
         >
           {run.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Play className="h-3.5 w-3.5 mr-1" />}
-          Run
+          Re-test
         </Button>
       </div>
 
       {!bt ? (
-        <div className="h-[320px] grid place-items-center text-xs text-muted-foreground font-mono">
-          No backtest yet — run one.
+        <div className="h-[320px] grid place-items-center text-xs text-muted-foreground font-mono px-6 text-center">
+          No test yet — tap “Re-test” to see how this crawler would have done on recent prices.
         </div>
       ) : (
         <div className="p-4 space-y-4">
@@ -96,21 +96,21 @@ export function BacktestPanel({ strategy }) {
 
           <div className={`flex items-center gap-2 text-xs font-mono px-3 py-2 rounded-sm border ${bt.beats_benchmark ? "border-buy/40 text-buy bg-buy/5" : "border-sell/40 text-sell bg-sell/5"}`} data-testid="benchmark-verdict">
             <Trophy className="h-3.5 w-3.5" />
-            {bt.beats_benchmark ? "Beats buy & hold" : "Underperforms buy & hold"} · {fmtPct(bt.total_return_pct)} vs {fmtPct(bt.benchmark_return_pct)}
+            {bt.beats_benchmark ? "Better than just buying and holding" : "Worse than just buying and holding"} · made {fmtPct(bt.total_return_pct)} vs {fmtPct(bt.benchmark_return_pct)}
           </div>
 
           <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-            <M label="Expectancy / trade" value={fmtPct(bt.expectancy_pct)} cls={pnlColor(bt.expectancy_pct)} />
-            <M label="Risk : Reward" value={bt.risk_reward} />
-            <M label="Max Drawdown" value={`${bt.max_drawdown_pct}%`} cls="text-sell" />
+            <M label="Avg per trade" value={fmtPct(bt.expectancy_pct)} cls={pnlColor(bt.expectancy_pct)} />
+            <M label="Win vs loss" value={bt.risk_reward} />
+            <M label="Worst drop" value={`${bt.max_drawdown_pct}%`} cls="text-sell" />
             <M label="Trades" value={bt.num_trades} />
-            <M label="Avg Win" value={fmtPct(bt.avg_win_pct)} cls="text-buy" />
-            <M label="Avg Loss" value={fmtPct(bt.avg_loss_pct)} cls="text-sell" />
-            <M label="Win Rate*" value={`${bt.win_rate}%`} />
-            <M label="Final Equity" value={fmtUsd(bt.final_equity)} />
+            <M label="Avg win" value={fmtPct(bt.avg_win_pct)} cls="text-buy" />
+            <M label="Avg loss" value={fmtPct(bt.avg_loss_pct)} cls="text-sell" />
+            <M label="Win rate" value={`${bt.win_rate}%`} />
+            <M label="Ended with" value={fmtUsd(bt.final_equity)} />
           </div>
           <div className="text-[10px] text-muted-foreground font-mono">
-            *Win rate shown but secondary — expectancy, R:R and drawdown decide edge. Fees {strategy?.fees_pct}% / slippage {strategy?.slippage_pct}% modeled. No lookahead (fill on next open).
+            Based on a pretend $10,000 over the last {bt.candles} price bars, including trading fees &amp; slippage. Past results don't guarantee the future — this just checks the crawler has a real edge.
           </div>
         </div>
       )}
