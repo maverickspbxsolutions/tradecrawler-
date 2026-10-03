@@ -1,10 +1,13 @@
 """Crypto market data. Binance.US primary, Coinbase Exchange fallback.
 Returns closed candles only (drops the currently-forming candle).
 Includes retries, in-memory TTL cache, and data-health tracking."""
+import os
 import time
+import json
 import asyncio
 import logging
 import httpx
+import websockets
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +53,82 @@ async def get_all_symbols():
     except Exception as e:  # noqa
         logger.warning(f"exchangeInfo fetch failed: {e}")
         return _symbols_cache["list"] or POPULAR_SYMBOLS
+
+
+# ---------------- Deriv (forex, commodities, crypto, indices, synthetics) ----------------
+DERIV_APP_ID = os.environ.get("DERIV_APP_ID", "1089")
+DERIV_API_TOKEN = os.environ.get("DERIV_API_TOKEN")
+DERIV_WS = f"wss://ws.derivws.com/websockets/v3?app_id={DERIV_APP_ID}"
+_DERIV_PREFIXES = ("R_", "1HZ", "frx", "cry", "OTC_", "WLD", "JD", "stpRNG",
+                   "BOOM", "CRASH", "RDBULL", "RDBEAR")
+_deriv_sym_cache = {"t": 0, "list": None}
+_deriv_symbol_set: set = set()
+
+
+def _is_deriv_symbol(sym: str) -> bool:
+    if not sym:
+        return False
+    if sym in _deriv_symbol_set:
+        return True
+    if sym.upper().endswith("USDT"):
+        return False
+    return sym.startswith(_DERIV_PREFIXES)
+
+
+async def _deriv_call(payload: dict, timeout: int = 20) -> dict:
+    async with websockets.connect(
+        DERIV_WS, open_timeout=timeout, close_timeout=5,
+        additional_headers={"Origin": "https://app.deriv.com", "User-Agent": "Mozilla/5.0"},
+    ) as ws:
+        if DERIV_API_TOKEN:
+            try:
+                await ws.send(json.dumps({"authorize": DERIV_API_TOKEN}))
+                await asyncio.wait_for(ws.recv(), timeout)
+            except Exception:  # noqa
+                pass
+        await ws.send(json.dumps(payload))
+        resp = json.loads(await asyncio.wait_for(ws.recv(), timeout))
+    if resp.get("error"):
+        raise RuntimeError(resp["error"].get("message", "deriv error"))
+    return resp
+
+
+async def get_deriv_symbols():
+    now = time.time()
+    if _deriv_sym_cache["list"] and now - _deriv_sym_cache["t"] < 3600:
+        return _deriv_sym_cache["list"]
+    try:
+        resp = await _deriv_call({"active_symbols": "brief", "product_type": "basic"})
+        syms = resp.get("active_symbols", [])
+        out = [{
+            "symbol": s["symbol"],
+            "label": s.get("display_name", s["symbol"]),
+            "market": s.get("market_display_name", "Deriv"),
+            "submarket": s.get("submarket_display_name", ""),
+        } for s in syms]
+        _deriv_sym_cache.update({"t": now, "list": out})
+        _deriv_symbol_set.clear()
+        _deriv_symbol_set.update(s["symbol"] for s in out)
+        return out
+    except Exception as e:  # noqa
+        logger.warning(f"Deriv active_symbols failed: {e}")
+        return _deriv_sym_cache["list"] or []
+
+
+async def _get_deriv_candles(symbol: str, timeframe: str, limit: int, closed_only: bool):
+    gran = TIMEFRAMES[timeframe][2]
+    count = max(50, min(limit + 1, 1000))
+    resp = await _deriv_call({"ticks_history": symbol, "end": "latest",
+                              "count": count, "style": "candles", "granularity": gran})
+    rows = resp.get("candles", [])
+    candles = [{"t": int(c["epoch"]) * 1000, "o": float(c["open"]), "h": float(c["high"]),
+                "l": float(c["low"]), "c": float(c["close"]), "v": 0.0} for c in rows]
+    if closed_only and len(candles) > 1:
+        candles = candles[:-1]
+    candles = candles[-limit:]
+    if candles:
+        health.update({"last_ok": time.time(), "source": "deriv", "error": None})
+    return candles
 
 _cache: dict = {}
 _CACHE_TTL = 25  # seconds
@@ -106,6 +185,9 @@ async def get_candles(symbol: str, timeframe: str, limit: int = 300, closed_only
     """Return list of candle dicts (ascending by time). Closed candles only."""
     if timeframe not in TIMEFRAMES:
         raise ValueError(f"Unsupported timeframe: {timeframe}")
+
+    if _is_deriv_symbol(symbol):
+        return await _get_deriv_candles(symbol, timeframe, limit, closed_only)
 
     key = f"{symbol.upper()}:{timeframe}:{limit}:{closed_only}"
     now = time.time()

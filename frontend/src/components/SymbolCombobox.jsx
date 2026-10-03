@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Check, ChevronsUpDown } from "lucide-react";
 import { api } from "@/lib/api";
@@ -21,7 +21,21 @@ export function SymbolCombobox({ value, onChange }) {
     queryFn: async () => (await api.get("/market/symbols")).data,
     staleTime: 3600000,
   });
-  const symbols = data?.symbols || ["BTCUSDT"];
+
+  const options = useMemo(
+    () => data?.options || [{ symbol: "BTCUSDT", label: "BTC / USDT", market: "Crypto (Binance)" }],
+    [data]
+  );
+
+  const groups = useMemo(() => {
+    const g = {};
+    for (const o of options) {
+      (g[o.market] = g[o.market] || []).push(o);
+    }
+    return g;
+  }, [options]);
+
+  const current = options.find((o) => o.symbol === value);
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -32,32 +46,34 @@ export function SymbolCombobox({ value, onChange }) {
           className="h-8 w-full justify-between rounded-sm text-xs font-mono mt-0.5"
           data-testid="symbol-combobox"
         >
-          {value || "Select pair"}
-          <ChevronsUpDown className="h-3.5 w-3.5 opacity-50" />
+          <span className="truncate">{current?.label || value || "Select instrument"}</span>
+          <ChevronsUpDown className="h-3.5 w-3.5 opacity-50 shrink-0" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-[260px] p-0 rounded-sm" align="start">
+      <PopoverContent className="w-[300px] p-0 rounded-sm" align="start">
         <Command>
-          <CommandInput placeholder="Search coin…" className="h-9 text-xs font-mono" data-testid="symbol-search" />
-          <CommandList>
-            <CommandEmpty>No pair found.</CommandEmpty>
-            <CommandGroup>
-              {symbols.map((s) => (
-                <CommandItem
-                  key={s}
-                  value={s}
-                  onSelect={() => {
-                    onChange(s);
-                    setOpen(false);
-                  }}
-                  className="text-xs font-mono"
-                  data-testid={`symbol-option-${s}`}
-                >
-                  <Check className={cn("mr-2 h-3.5 w-3.5", value === s ? "opacity-100" : "opacity-0")} />
-                  {s.replace("USDT", "")} <span className="text-muted-foreground ml-1">/ USDT</span>
-                </CommandItem>
-              ))}
-            </CommandGroup>
+          <CommandInput placeholder="Search Gold, BTC, Volatility, EURUSD…" className="h-9 text-xs font-mono" data-testid="symbol-search" />
+          <CommandList className="max-h-[320px]">
+            <CommandEmpty>No instrument found.</CommandEmpty>
+            {Object.entries(groups).map(([market, items]) => (
+              <CommandGroup key={market} heading={market}>
+                {items.map((o) => (
+                  <CommandItem
+                    key={o.symbol}
+                    value={`${o.symbol} ${o.label}`}
+                    onSelect={() => {
+                      onChange(o.symbol);
+                      setOpen(false);
+                    }}
+                    className="text-xs font-mono"
+                    data-testid={`symbol-option-${o.symbol}`}
+                  >
+                    <Check className={cn("mr-2 h-3.5 w-3.5 shrink-0", value === o.symbol ? "opacity-100" : "opacity-0")} />
+                    <span className="truncate">{o.label}</span>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            ))}
           </CommandList>
         </Command>
       </PopoverContent>

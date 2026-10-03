@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Activity, Loader2, TriangleAlert } from "lucide-react";
+import { Loader2, TriangleAlert } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
+import { SpiderIcon } from "@/components/SpiderIcon";
 import { formatApiErrorDetail } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -52,7 +53,7 @@ export default function Login() {
         <form onSubmit={submit} className="w-full max-w-sm" data-testid="login-form">
           <div className="flex items-center gap-3 mb-8">
             <div className="h-10 w-10 grid place-items-center border border-primary/40 bg-primary/10 rounded-sm">
-              <Activity className="h-5 w-5 text-primary" />
+              <SpiderIcon className="h-6 w-6 text-primary" />
             </div>
             <div>
               <div className="text-lg font-semibold tracking-tight">TradeCrawler</div>

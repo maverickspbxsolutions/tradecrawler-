@@ -43,16 +43,39 @@ async def _auto_evaluate(sid: str):
 # ---------------- Market ----------------
 @api.get("/market/symbols")
 async def symbols():
-    syms = await md.get_all_symbols()
-    return {"symbols": syms, "popular": md.POPULAR_SYMBOLS,
-            "timeframes": list(md.TIMEFRAMES.keys()), "default": "BTCUSDT"}
+    crypto = await md.get_all_symbols()
+    deriv = await md.get_deriv_symbols()
+    options = [{"symbol": s, "label": s.replace("USDT", "") + " / USDT",
+                "market": "Crypto (Binance)", "source": "binance"} for s in crypto]
+
+    def rank(d):
+        lbl = (d["label"] + " " + d["symbol"]).lower()
+        m = d["market"].lower()
+        if "gold" in lbl or d["symbol"] == "frxXAUUSD":
+            return 0
+        if d["symbol"].startswith("cry") or "bitcoin" in lbl or "btc" in lbl:
+            return 1
+        if "volatility" in m or "volatility" in lbl or d["symbol"].startswith(("R_", "1HZ")):
+            return 2
+        return 5
+
+    for d in sorted(deriv, key=rank):
+        options.append({"symbol": d["symbol"], "label": d["label"],
+                        "market": f"Deriv · {d['market']}", "source": "deriv"})
+
+    return {"options": options, "symbols": [o["symbol"] for o in options],
+            "default": "BTCUSDT", "timeframes": list(md.TIMEFRAMES.keys()),
+            "deriv_available": len(deriv) > 0}
 
 
 @api.get("/market/candles")
 async def candles(symbol: str = "BTCUSDT", timeframe: str = "1h", limit: int = 300):
     limit = max(50, min(limit, 1000))
-    data = await md.get_candles(symbol, timeframe, limit)
-    return {"symbol": symbol.upper(), "timeframe": timeframe, "candles": data}
+    try:
+        data = await md.get_candles(symbol, timeframe, limit)
+    except Exception as e:  # noqa
+        raise HTTPException(502, f"Could not load {symbol} data: {e}")
+    return {"symbol": symbol, "timeframe": timeframe, "candles": data}
 
 
 @api.get("/market/health")

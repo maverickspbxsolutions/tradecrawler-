@@ -1,8 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
-import { Activity, LogOut, Settings, Radio, Database, Sun, Moon } from "lucide-react";
+import { LogOut, Settings, Radio, Database, Sun, Moon } from "lucide-react";
 import { useTheme } from "next-themes";
 import { api } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
+import { SpiderIcon } from "@/components/SpiderIcon";
 import { Button } from "@/components/ui/button";
 
 export function TopBar({ onOpenSettings }) {
@@ -23,7 +24,7 @@ export function TopBar({ onOpenSettings }) {
       <div className="w-full max-w-[1920px] mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="h-8 w-8 grid place-items-center border border-primary/40 bg-primary/10 rounded-sm">
-            <Activity className="h-4 w-4 text-primary" />
+            <SpiderIcon className="h-5 w-5 text-primary" />
           </div>
           <div className="leading-tight">
             <div className="text-sm font-semibold tracking-tight">TradeCrawler</div>
