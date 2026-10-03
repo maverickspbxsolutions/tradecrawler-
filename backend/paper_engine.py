@@ -16,13 +16,26 @@ PAPER_CAPITAL = 10000.0
 TRADE_CAPITAL = 20.0  # assume the trader can act on ~$20 the moment the email lands
 
 
+def _humanize_duration(ms) -> str | None:
+    if not ms or ms <= 0:
+        return None
+    mins = ms / 60000.0
+    if mins < 90:
+        return f"about {round(mins)} minutes"
+    hours = mins / 60.0
+    if hours < 48:
+        return f"about {round(hours)} hours"
+    return f"about {round(hours / 24.0)} days"
+
+
 async def _trade_plan(strategy: dict, side: str, price: float) -> dict:
     """Plain-English, dollar-concrete plan assuming ~$20 ready to trade."""
     cap = TRADE_CAPITAL
     if side != "BUY":
         return {"action": "SELL", "capital": cap, "entry": round(price, 6)}
     bt = await db.backtests.find_one(
-        {"strategy_id": strategy["id"]}, {"_id": 0, "avg_win_pct": 1, "avg_loss_pct": 1})
+        {"strategy_id": strategy["id"]},
+        {"_id": 0, "avg_win_pct": 1, "avg_loss_pct": 1, "avg_hold_ms": 1})
     aw = (bt or {}).get("avg_win_pct") or 2.5
     al = (bt or {}).get("avg_loss_pct") or -1.5
     if aw <= 0:
@@ -41,6 +54,7 @@ async def _trade_plan(strategy: dict, side: str, price: float) -> dict:
         "stop_pct": round(al, 2),
         "est_profit": round(cap * aw / 100, 2),
         "est_loss": round(cap * al / 100, 2),
+        "hold_label": _humanize_duration((bt or {}).get("avg_hold_ms")),
     }
 
 

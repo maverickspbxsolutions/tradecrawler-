@@ -72,6 +72,17 @@ out-of-sample validation and market-regime detection.
   60s negative-cache block so Deriv requests don't each eat the ~5s WS open-timeout (repeats ~0.15s).
 - Tested: iteration_7.json — backend 12/12 pytest; all frontend flows + graceful degradation verified.
 
+## Iteration — Richer signal emails (2026-06)
+- BUY alert emails now include: explicit BUY/SELL action, **Take-profit (TP)** and **Stop-loss (SL)**
+  price levels (from backtest avg win/loss %), **how long to stay in the trade** (avg hold time,
+  humanized), and an **estimated profit/risk table for $20 / $50 / $100** stakes.
+- SELL alert emails show the realized result by stake size ($20/$50/$100) from the signal's return %.
+- Dashboard UNCHANGED — still assumes $20 (SignalFeed PlanLine reads only capital/entry/target/est_profit).
+  Multi-stake tiers are computed inside the email builder only; `hold_label` added to plan is ignored by UI.
+- Backend: backtester.py now returns `avg_hold_ms`; paper_engine `_trade_plan` adds `hold_label`
+  (`_humanize_duration`); alerts.py `_signal_html` rebuilt (passes the phishing-safety scan — tables only,
+  no forms/inputs, no external links). All existing strategy backtests re-run to populate avg_hold_ms.
+
 ## Known Caveats
 - Deriv market data (Gold, Volatility Indices, forex, stock indices) is UNREACHABLE from the
   Emergent builder/preview egress (Cloudflare HTTP 520). Deriv instruments still appear in the picker

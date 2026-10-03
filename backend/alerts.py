@@ -129,26 +129,80 @@ def _signal_html(signal: dict, strategy_name: str) -> str:
     plan = signal.get("plan") or {}
 
     if side == "BUY":
+        tp_pct = plan.get("target_pct", 0)
+        sl_pct = plan.get("stop_pct", 0)
+        hold = plan.get("hold_label")
+        rows = ""
+        for c in (20, 50, 100):
+            prof = c * tp_pct / 100.0
+            loss = c * sl_pct / 100.0
+            rows += (
+                f'<tr>'
+                f'<td style="padding:7px 10px;border-top:1px solid #1F1F24;font-size:14px">${c}</td>'
+                f'<td style="padding:7px 10px;border-top:1px solid #1F1F24;font-size:14px;color:#00E676;text-align:right">+${prof:,.2f}</td>'
+                f'<td style="padding:7px 10px;border-top:1px solid #1F1F24;font-size:14px;color:#FF3366;text-align:right">-${abs(loss):,.2f}</td>'
+                f'</tr>'
+            )
+        hold_html = (
+            f'<p style="font-size:15px;margin:2px 0">&#9201; How long to stay in: '
+            f'<strong>{escape(str(hold))}</strong> (based on how long this setup usually takes to play out).</p>'
+            if hold else "")
         plan_html = (
-            f'<p style="font-size:16px;margin:14px 0 4px">What to do now:</p>'
-            f'<p style="font-size:15px;margin:2px 0">Buy about <strong>${plan.get("capital",20):.0f}</strong> '
-            f'of {escape(coin)} at around <strong>${price:,.4f}</strong>.</p>'
-            f'<p style="font-size:15px;margin:2px 0">Goal: sell near <strong>${plan.get("target_price",0):,.4f}</strong> '
-            f'(about +{plan.get("target_pct",0)}%) &rarr; roughly '
-            f'<strong style="color:#00E676">+${plan.get("est_profit",0)}</strong> profit on your ${plan.get("capital",20):.0f}.</p>'
-            f'<p style="font-size:15px;margin:2px 0">Safety: if it falls near <strong>${plan.get("stop_price",0):,.4f}</strong> '
-            f'(about {plan.get("stop_pct",0)}%), consider selling to limit the loss '
-            f'(about ${plan.get("est_loss",0)}).</p>'
-            f'<p style="font-size:13px;color:#8A8A93;margin-top:8px">The bot will email you again when it\'s time to sell.</p>'
+            f'<p style="font-size:16px;margin:14px 0 4px"><strong>What to do now:</strong></p>'
+            f'<p style="font-size:15px;margin:2px 0"><strong>Buy</strong> {escape(coin)} at around '
+            f'<strong>${price:,.4f}</strong>.</p>'
+            f'<p style="font-size:15px;margin:2px 0">Take-profit (TP): sell near '
+            f'<strong style="color:#00E676">${plan.get("target_price",0):,.4f}</strong> (about +{tp_pct}%).</p>'
+            f'<p style="font-size:15px;margin:2px 0">Stop-loss (SL): if it drops to '
+            f'<strong style="color:#FF3366">${plan.get("stop_price",0):,.4f}</strong> (about {sl_pct}%), '
+            f'sell to limit the loss.</p>'
+            f'{hold_html}'
+            f'<p style="font-size:16px;margin:16px 0 6px"><strong>What you could make or risk:</strong></p>'
+            f'<table role="presentation" width="100%" style="border-collapse:collapse;background:#121215;border-radius:6px">'
+            f'<tr>'
+            f'<td style="padding:7px 10px;font-size:11px;color:#8A8A93;text-transform:uppercase;letter-spacing:1px">If you put in</td>'
+            f'<td style="padding:7px 10px;font-size:11px;color:#8A8A93;text-transform:uppercase;letter-spacing:1px;text-align:right">If TP hits</td>'
+            f'<td style="padding:7px 10px;font-size:11px;color:#8A8A93;text-transform:uppercase;letter-spacing:1px;text-align:right">If SL hits</td>'
+            f'</tr>'
+            f'{rows}'
+            f'</table>'
+            f'<p style="font-size:12px;color:#8A8A93;margin-top:6px">Estimates from this crawler&#39;s past '
+            f'winning and losing trades &mdash; real results vary. Figures are before trading fees.</p>'
+            f'<p style="font-size:13px;color:#8A8A93;margin-top:8px">The crawler will email you again when it&#39;s time to sell.</p>'
         )
     else:
         pnl = signal.get("pnl")
+        ret = signal.get("return_pct")
         pnl_line = (f' Your simulated trade result: <strong style="color:{"#00E676" if (pnl or 0)>=0 else "#FF3366"}">'
                     f'${pnl}</strong>.' if pnl is not None else "")
+        tiers_html = ""
+        if ret is not None:
+            rows = ""
+            for c in (20, 50, 100):
+                res = c * ret / 100.0
+                col = "#00E676" if res >= 0 else "#FF3366"
+                sign = "+" if res >= 0 else "-"
+                rows += (
+                    f'<tr>'
+                    f'<td style="padding:7px 10px;border-top:1px solid #1F1F24;font-size:14px">${c}</td>'
+                    f'<td style="padding:7px 10px;border-top:1px solid #1F1F24;font-size:14px;color:{col};text-align:right">'
+                    f'{sign}${abs(res):,.2f}</td>'
+                    f'</tr>'
+                )
+            tiers_html = (
+                f'<p style="font-size:16px;margin:16px 0 6px"><strong>This trade&#39;s result by stake size:</strong></p>'
+                f'<table role="presentation" width="100%" style="border-collapse:collapse;background:#121215;border-radius:6px">'
+                f'<tr>'
+                f'<td style="padding:7px 10px;font-size:11px;color:#8A8A93;text-transform:uppercase;letter-spacing:1px">If you put in</td>'
+                f'<td style="padding:7px 10px;font-size:11px;color:#8A8A93;text-transform:uppercase;letter-spacing:1px;text-align:right">Result (~{ret:.2f}%)</td>'
+                f'</tr>{rows}</table>'
+                f'<p style="font-size:12px;color:#8A8A93;margin-top:6px">Before trading fees. Based on the entry and exit prices for this signal.</p>'
+            )
         plan_html = (
-            f'<p style="font-size:16px;margin:14px 0 4px">What to do now:</p>'
+            f'<p style="font-size:16px;margin:14px 0 4px"><strong>What to do now:</strong></p>'
             f'<p style="font-size:15px;margin:2px 0">Time to <strong>sell</strong> your {escape(coin)} position, '
             f'around <strong>${price:,.4f}</strong>.{pnl_line}</p>'
+            f'{tiers_html}'
         )
 
     return (

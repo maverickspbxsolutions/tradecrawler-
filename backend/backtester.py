@@ -99,6 +99,11 @@ def run_backtest(candles: list, strategy: dict, initial_capital: float = 10000.0
     expectancy = sum(t["return_pct"] for t in trades) / num if num else 0.0
     risk_reward = abs(avg_win / avg_loss) if avg_loss != 0 else (float("inf") if avg_win > 0 else 0.0)
 
+    holds = [t["exit_time"] - t["entry_time"] for t in trades
+             if isinstance(t.get("entry_time"), (int, float))
+             and isinstance(t.get("exit_time"), (int, float))]
+    avg_hold_ms = round(sum(holds) / len(holds)) if holds else 0
+
     total_return = (final_equity / initial_capital - 1) * 100
     bench_return = (equity_curve[-1]["benchmark"] / initial_capital - 1) * 100
     beats_benchmark = total_return > bench_return
@@ -119,6 +124,7 @@ def run_backtest(candles: list, strategy: dict, initial_capital: float = 10000.0
         "expectancy_pct": round(expectancy, 4),
         "risk_reward": round(risk_reward, 3) if risk_reward != float("inf") else 999.0,
         "max_drawdown_pct": round(max_dd, 2),
+        "avg_hold_ms": avg_hold_ms,
         "gate_passed": bool(beats_benchmark and expectancy > 0 and num >= 3),
         "equity_curve": equity_curve,
         "trades": trades[-100:],
