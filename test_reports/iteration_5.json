@@ -1,0 +1,25 @@
+{
+  "summary": "Frontend-only verification of Settings 'Send test' bug fix in TradeCrawler. Logged in as xambiep90, opened Settings dialog, exercised all 5 requested scenarios. All passed: (1) empty case shows 'Add an email address first' error toast (no crash); (2) typing 'delivered@resend.dev' without clicking Add + Send test auto-adds the email as a chip, clears input, calls POST /api/alerts/test (200 {sent:true}), and shows success toast 'Test email sent to 1 address(es)'; (3) happy path with chip present also returns 200 and success toast; (4) add-email-btn adds chip, X removes chip; (5) dashboard loads, settings load+save (Saved toast), no 500s. Backend endpoint confirmed via network capture: POST /api/alerts/test -> 200 with recipients array containing delivered@resend.dev. Final email list left containing only delivered@resend.dev as requested.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Dashboard price chart", "issues": ["Recharts console warning: 'The width(-1) and height(-1) of chart should be greater than 0' - cosmetic warning on initial render, chart still renders correctly"]}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "SettingsDialog.runTest auto-saves emails via api.put('/settings', ...) directly and then also triggers invalidation + the add path separately uses save.mutate — minor duplication but acceptable.",
+    "The 'Saved' toast appears alongside 'Test email sent to 1 address(es)' in the typed-not-added flow because runTest performs an inline PUT /settings while the useQueryClient invalidation triggers a save-like toast via the mutation path. Not a bug but could be deduped for cleaner UX."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (skipped per request)", "frontend": "100%"},
+  "test_credentials": "xambiep90 / Reddestroad1$ (works). Test email: delivered@resend.dev",
+  "seed_data_creation": "Left Settings alert_emails = ['delivered@resend.dev'] as requested",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Settings dialog is a Radix dialog with data-testid='settings-dialog'. Open via [data-testid=open-settings-btn]. Toasts are sonner (li[data-sonner-toast]) and auto-dismiss ~4s, so capture toast text within 500-1000ms of action. POST /api/alerts/test returns {sent, email_id, recipients} on success.",
+  "rca of the issue": "Original 'Could not send' bug: typing an email in input without clicking Add left form.alert_emails empty; POST /api/alerts/test then returned 400. Fix verified: runTest() now reads newEmail, if valid-looking and not already in the list it is appended, state+server updated via PUT /settings, then test.mutate() fires. Verified the chip appears and success toast shows in a single click."
+}
