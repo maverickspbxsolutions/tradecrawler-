@@ -83,6 +83,24 @@ out-of-sample validation and market-regime detection.
   (`_humanize_duration`); alerts.py `_signal_html` rebuilt (passes the phishing-safety scan — tables only,
   no forms/inputs, no external links). All existing strategy backtests re-run to populate avg_hold_ms.
 
+## Iteration — Real data via Yahoo + theme polish (2026-06)
+- DATA FIX: Deriv WS is Cloudflare-blocked (HTTP 520) from Emergent egress. Deriv instruments with a
+  real-world equivalent now pull REAL data from **Yahoo Finance** (reachable, no key): Gold (GC=F),
+  metals, Deriv-crypto (BTC-USD…), forex (EURUSD=X…), stock indices (^GSPC…). See `DERIV_TO_YAHOO` map +
+  `_fetch_yahoo()` in market_data.py; `get_candles`/`get_live` route these to Yahoo, 4h is resampled from 60m.
+  Only Deriv-proprietary SYNTHETIC/volatility indices (R_*, 1HZ*, BOOM*, CRASH*, Step, Jump, Bull/Bear)
+  have no external source → HTTP 200 `{available:false, reason}` with a clear "Deriv-only" message.
+- THEME FIX: added `lib/useChartTheme.js` (reads CSS vars per resolved theme). Replaced hardcoded dark
+  hex (#1F1F24/#8A8A93/#121215/#1A1A1F/#00E5FF/#565660) in Candlestick, PriceChart, MarketOutlook,
+  BacktestPanel, PaperPanel, EvolutionPanel, SignalFeed with theme-aware colors. Fixed DisclaimerBanner
+  (bg-warn wasn't applying → now explicit `hsl(var(--warn))`). Light + dark both verified cohesive.
+- Tested: iteration_8.json — backend 24/24 pytest; Yahoo-backed candles/outlook/live/backtest verified;
+  synthetic graceful message; theme toggle both ways across all panels.
+
+## Known Caveats (Deriv App ID)
+- DERIV_APP_ID stays numeric "1089" (public market-data WS). User's OAuth App ID 34zIy2UfIdAzHQNsLhUod
+  saved as DERIV_OAUTH_APP_ID for future login features (not needed for market data).
+
 ## Known Caveats
 - Deriv market data (Gold, Volatility Indices, forex, stock indices) is UNREACHABLE from the
   Emergent builder/preview egress (Cloudflare HTTP 520). Deriv instruments still appear in the picker

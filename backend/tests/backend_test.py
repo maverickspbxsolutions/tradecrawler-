@@ -201,29 +201,62 @@ class TestMarket:
         assert "BTCUSDT" in syms
         assert d["default"] == "BTCUSDT"
 
-    # ---------- Graceful degradation: Deriv unreachable ----------
-    # Note: the backend returns a proper JSON 502 with a clear detail message
-    # (e.g. "Could not load frxXAUUSD data: server rejected WebSocket connection: HTTP 520"),
-    # but Cloudflare rewrites origin 502s to its own HTML error page on the public URL.
-    # From the UI/API-consumer perspective the status code is still 502, which is the
-    # critical bit — the server did NOT crash with a 500 or leak a stack trace.
-    def test_candles_deriv_graceful_502(self, client):
-        r = client.get(f"{API}/market/candles?symbol=frxXAUUSD&timeframe=1h", timeout=30)
-        assert r.status_code == 502, f"expected 502 for unreachable Deriv, got {r.status_code}: {r.text[:200]}"
-        assert r.status_code != 500, "must not be a 500 stack trace"
-        # If the response is JSON (direct from backend), check the message.
-        try:
-            body = r.json()
-            detail = str(body.get("detail", ""))
-            assert detail, "502 JSON response must include a clear error message"
-        except ValueError:
-            # Cloudflare HTML 502 page — still acceptable (origin returned 502).
-            assert "502" in r.text or "Bad gateway" in r.text
+    # ---------- Yahoo-backed Deriv symbols (real-world equivalents) ----------
+    def test_candles_frxXAUUSD_via_yahoo(self, client):
+        r = client.get(f"{API}/market/candles?symbol=frxXAUUSD&timeframe=1h", timeout=60)
+        assert r.status_code == 200, r.text
+        d = r.json()
+        assert d.get("available") is True, f"expected available:true, got {d}"
+        assert isinstance(d["candles"], list) and len(d["candles"]) > 0
+        c = d["candles"][0]
+        for k in ["o", "h", "l", "c", "t"]:
+            assert k in c
 
-    def test_outlook_deriv_graceful_502(self, client):
-        r = client.get(f"{API}/market/outlook?symbol=frxXAUUSD&timeframe=1h", timeout=30)
-        assert r.status_code == 502, f"expected 502, got {r.status_code}: {r.text[:200]}"
-        assert r.status_code != 500
+    def test_candles_cryBTCUSD_4h_via_yahoo(self, client):
+        r = client.get(f"{API}/market/candles?symbol=cryBTCUSD&timeframe=4h", timeout=60)
+        assert r.status_code == 200, r.text
+        d = r.json()
+        assert d.get("available") is True
+        assert len(d["candles"]) > 0
+
+    def test_candles_frxEURUSD_via_yahoo(self, client):
+        r = client.get(f"{API}/market/candles?symbol=frxEURUSD&timeframe=1h", timeout=60)
+        assert r.status_code == 200, r.text
+        d = r.json()
+        assert d.get("available") is True
+        assert len(d["candles"]) > 0
+
+    def test_candles_OTC_SPC_via_yahoo(self, client):
+        r = client.get(f"{API}/market/candles?symbol=OTC_SPC&timeframe=1d", timeout=60)
+        assert r.status_code == 200, r.text
+        d = r.json()
+        assert d.get("available") is True
+        assert len(d["candles"]) > 0
+
+    def test_outlook_frxXAUUSD_via_yahoo(self, client):
+        r = client.get(f"{API}/market/outlook?symbol=frxXAUUSD&timeframe=1h", timeout=60)
+        assert r.status_code == 200, r.text
+        d = r.json()
+        assert d.get("available") is True
+        assert d["direction"] in ("Up", "Down", "Neutral")
+        assert isinstance(d["confidence"], int) and 0 <= d["confidence"] <= 100
+
+    def test_live_frxXAUUSD_via_yahoo(self, client):
+        r = client.get(f"{API}/market/live?symbol=frxXAUUSD&timeframe=1h", timeout=60)
+        assert r.status_code == 200, r.text
+        d = r.json()
+        assert d.get("price") is not None
+        assert d.get("source") == "yahoo"
+
+    # ---------- Synthetic/Volatility (Deriv-only) graceful message ----------
+    def test_candles_R_100_synthetic_message(self, client):
+        r = client.get(f"{API}/market/candles?symbol=R_100&timeframe=1h", timeout=30)
+        assert r.status_code == 200, f"expected 200, got {r.status_code}: {r.text[:200]}"
+        d = r.json()
+        assert d.get("available") is False
+        reason = (d.get("reason") or "").lower()
+        assert "synthetic" in reason or "volatility" in reason or "deriv" in reason, \
+            f"reason should mention Deriv-only synthetic/volatility indices, got: {d.get('reason')!r}"
 
 
 # ---------- Settings / Alerts (Resend) ----------
@@ -231,12 +264,12 @@ class TestSettingsAlerts:
     def test_get_put_settings(self, client):
         r = client.get(f"{API}/settings", timeout=30)
         assert r.status_code == 200
-        r = client.put(f"{API}/settings", json={"alert_email": "delivered@resend.dev", "email_enabled": True}, timeout=30)
+        r = client.put(f"{API}/settings", json={"alert_emails": ["delivered@resend.dev"], "email_enabled": True}, timeout=30)
         assert r.status_code == 200
-        assert r.json()["alert_email"] == "delivered@resend.dev"
+        assert "delivered@resend.dev" in (r.json().get("alert_emails") or [])
 
     def test_alerts_test_email(self, client):
-        client.put(f"{API}/settings", json={"alert_email": "delivered@resend.dev"}, timeout=30)
+        client.put(f"{API}/settings", json={"alert_emails": ["delivered@resend.dev"]}, timeout=30)
         r = client.post(f"{API}/alerts/test", timeout=60)
         assert r.status_code == 200, r.text
         d = r.json()

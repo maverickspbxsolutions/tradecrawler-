@@ -1,0 +1,38 @@
+{
+  "summary": "Validated the two latest TradeCrawler changes end-to-end: (A) Yahoo-Finance fallback for Deriv-mapped real-world instruments, and (B) theme-aware chart/outlook/panels. Backend pytest = 24/24 PASS, including 7 new TestMarket cases for Yahoo-backed Deriv symbols (frxXAUUSD 1h, cryBTCUSD 4h resampled, frxEURUSD 1h, OTC_SPC 1d), /market/outlook on frxXAUUSD (direction + confidence), /market/live on frxXAUUSD returning price with source=='yahoo', and the synthetic R_100 1h now returns HTTP 200 with available:false + reason mentioning 'Synthetic & Volatility indices are generated only by Deriv' (previously 502, now a clean machine-readable flag — the Cloudflare 502 rewrite issue flagged in iteration_7 is fixed). Regression: BTCUSDT 1h still available via binance.us (no regression). Backtest on frxXAUUSD (Yahoo) runs end-to-end: POST /strategies/{id}/backtest returned 200 with num_trades=3, no error. Frontend (desktop 1920x1080): login with xambiep90/Reddestroad1$ reaches dashboard; selecting the BTC DEV / cryBTCUSD card shows price-chart with $84,756.61 and live-indicator 'Live · 3s ago' plus a 'live data · yahoo' footer chip (confirms Yahoo backing for cryBTCUSD). MarketOutlook renders 'Leaning Up' direction, bias +21, confidence 45% bar, 4 metric chips (Trend Slope, RSI, MACD, Volatility) and 5 reasons. THEME TOGGLE via data-testid='theme-toggle-btn' flips html.className 'dark' <-> 'light' and body bg from rgb(9,9,11) to rgb(249,249,251); in light mode the PriceChart container becomes bg rgb(255,255,255) with text rgb(27,27,34), grid lines and axis labels are readable, candles stay green/red, MarketOutlook 'Leaning Up' row has a soft green bg with legible dark text, confidence bar visible, metric chips readable. Second toggle returns to dark cleanly. Switching to the seeded '100 Index' (R_100) card: data-testid='chart-unavailable' and data-testid='outlook-error' both render the exact synthetic/Deriv message instead of a Cloudflare phrase — the API-flag path is now the sole source of UI copy. No console errors from app code; only two unrelated 404/400s on resource fetches (likely favicons/signals endpoint called before strategy selection), no crashes.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Light-mode top strip + global header", "issues": ["The sticky disclaimer banner ('SIGNALS ARE NOT FINANCIAL ADVICE…') and the top app bar (TradeCrawler logo row, 'BINANCE.US · WATCHING 24/7', theme toggle, settings icon, username, Exit) remain on a dark background in light mode. The main dashboard surface transitions correctly; only the chrome strip stays dark. If this is intentional (branded banner) it's fine; if not, these elements should use the same theme variables as the rest of the page."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Optional: decide whether the top disclaimer banner + app header should theme-switch along with the rest of the dashboard (currently stays dark in light mode).",
+    "Optional carryover (not blocking): recharts width(-1)/height(-1) console warning on initial chart mount — benign."
+  ],
+  "critical_code_review_comments": [
+    "backend/market_data.py L287: _fetch_yahoo uses httpx with no retry; a transient 429/5xx from Yahoo will raise DerivUnavailable and the UI will show the synthetic/Deriv-only copy even for a real-world symbol. Consider one retry + a 60s negative cache like get_deriv_symbols.",
+    "backend/routes.py get_candles L80-82: non-Deriv failures still raise HTTPException(502) (which Cloudflare rewrites). For symmetry with the new Deriv path and the outlook/live endpoints, consider returning 200 + {available:false, reason} here too so the UI never sees a CF-rewritten body.",
+    "backend/market_data.py L302: 4h resampling of 60m Yahoo candles — the final (open) 4h bucket is included because closed_only slicing happens on the pre-resample list. Low impact (chart is read-only), but if strict closed-only is required for backtests the resample should drop the last incomplete bucket.",
+    "backend/market_data.py get_live L446-449: Yahoo path doesn't update health{} on success (deriv path at L222 does). Minor — /market/health will show stale source after a Yahoo-only run."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py"
+  ],
+  "success_rate": {"backend": "100% (24/24 pytest)", "frontend": "100% of requested flows verified (login, chart live, outlook, theme toggle both ways, synthetic graceful message, Yahoo-backed strategy backtest)"},
+  "test_credentials": "xambiep90 / Reddestroad1$ (works)",
+  "seed_data_creation": "Created a transient TEST_GOLD_* strategy on frxXAUUSD 1h to run a backtest (confirmed num_trades=3, no error) then deleted it.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Both reported changes are working. (A) Deriv-mapped real-world symbols now flow through Yahoo (DERIV_TO_YAHOO map) — frxXAUUSD, cryBTCUSD, forex, OTC_* indices all return available:true. Backtests on these symbols work. (B) Synthetic/volatility indices (R_*, 1HZ*, BOOM*, CRASH*, Step, Jump, Bull/Bear) correctly return HTTP 200 with available:false and a clear reason — the frontend reads data-testid='chart-unavailable' and 'outlook-error' and shows the backend's reason verbatim (no more Cloudflare leak). Theme toggle (data-testid='theme-toggle-btn') cleanly flips html.className dark<->light and all theme-aware panels (PriceChart, MarketOutlook, chips, confidence bar) have correct contrast in both modes. Only cosmetic observation: the top disclaimer banner + app header stays dark in light mode — worth confirming with product whether that's intentional.",
+  "rca of the issue": "N/A — the two previously-reported issues (Deriv WS blocked -> 502 on real-world symbols, and Cloudflare rewriting 502 into HTML inside Market Outlook) are both resolved by this iteration's changes. Real-world Deriv symbols now resolve via Yahoo; synthetic-only symbols return HTTP 200 + available:false + reason, giving the UI a stable machine-readable payload that Cloudflare does not rewrite."
+}
