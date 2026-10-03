@@ -6,6 +6,7 @@ import { TopBar } from "@/components/TopBar";
 import { HowItWorks } from "@/components/HowItWorks";
 import { StatsBar } from "@/components/StatsBar";
 import { PriceChart } from "@/components/PriceChart";
+import { MarketOutlook } from "@/components/MarketOutlook";
 import { SignalFeed } from "@/components/SignalFeed";
 import { MiniSimulations } from "@/components/MiniSimulations";
 import { StrategyList } from "@/components/StrategyList";
@@ -20,6 +21,7 @@ export default function Dashboard() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
   const [editStrategy, setEditStrategy] = useState(null);
+  const [tf, setTf] = useState("1h");
 
   const { data: strategies } = useQuery({
     queryKey: ["strategies"],
@@ -32,6 +34,11 @@ export default function Dashboard() {
   }, [strategies, selectedId]);
 
   const selected = (strategies || []).find((s) => s.id === selectedId) || null;
+
+  useEffect(() => {
+    if (selected?.timeframe) setTf(selected.timeframe);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId]);
 
   const openNew = () => {
     setEditStrategy(null);
@@ -54,7 +61,8 @@ export default function Dashboard() {
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
           <div className="lg:col-span-8 space-y-3">
-            <PriceChart symbol={selected?.symbol || "BTCUSDT"} timeframe={selected?.timeframe || "1h"} />
+            <PriceChart symbol={selected?.symbol || "BTCUSDT"} tf={tf} onTfChange={setTf} />
+            <MarketOutlook symbol={selected?.symbol || "BTCUSDT"} tf={tf} />
             <SignalFeed />
             <MiniSimulations strategy={selected} />
           </div>

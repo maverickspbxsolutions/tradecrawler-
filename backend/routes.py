@@ -17,6 +17,7 @@ from paper_engine import run_strategy_step, backfill_signals, PAPER_CAPITAL
 from alerts import get_settings, send_email, EMAIL_FROM_NAME
 from scheduler import POLL_SECONDS, EVOLVE_SECONDS
 from evolution import evolve_strategy, detect_regime
+from outlook import compute_outlook
 
 api = APIRouter(prefix="/api", dependencies=[Depends(get_current_user)])
 
@@ -76,6 +77,23 @@ async def candles(symbol: str = "BTCUSDT", timeframe: str = "1h", limit: int = 3
     except Exception as e:  # noqa
         raise HTTPException(502, f"Could not load {symbol} data: {e}")
     return {"symbol": symbol, "timeframe": timeframe, "candles": data}
+
+
+@api.get("/market/live")
+async def market_live(symbol: str = "BTCUSDT", timeframe: str = "1h"):
+    try:
+        return await md.get_live(symbol, timeframe)
+    except Exception as e:  # noqa
+        raise HTTPException(502, f"Could not load live {symbol}: {e}")
+
+
+@api.get("/market/outlook")
+async def market_outlook(symbol: str = "BTCUSDT", timeframe: str = "1h"):
+    try:
+        candles = await md.get_candles(symbol, timeframe, 300)
+    except Exception as e:  # noqa
+        raise HTTPException(502, f"Could not load {symbol} data: {e}")
+    return compute_outlook(candles, symbol, timeframe)
 
 
 @api.get("/market/health")

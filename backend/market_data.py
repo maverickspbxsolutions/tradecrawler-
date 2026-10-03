@@ -65,6 +65,73 @@ _deriv_sym_cache = {"t": 0, "list": None, "fail_t": 0}
 _deriv_symbol_set: set = set()
 
 
+def _ds(symbol, label, market, submarket=""):
+    return {"symbol": symbol, "label": label, "market": market, "submarket": submarket}
+
+
+# Static list of Deriv instruments so the picker is ALWAYS populated, even when the
+# Deriv WebSocket is unreachable. When the live feed is reachable it replaces this.
+DERIV_FALLBACK_SYMBOLS = [
+    # Commodities / metals
+    _ds("frxXAUUSD", "Gold/USD", "Commodities", "Metals"),
+    _ds("frxXAGUSD", "Silver/USD", "Commodities", "Metals"),
+    _ds("frxXPTUSD", "Platinum/USD", "Commodities", "Metals"),
+    _ds("frxXPDUSD", "Palladium/USD", "Commodities", "Metals"),
+    # Crypto (Deriv CFD)
+    _ds("cryBTCUSD", "BTC/USD", "Cryptocurrencies", "Crypto"),
+    _ds("cryETHUSD", "ETH/USD", "Cryptocurrencies", "Crypto"),
+    _ds("cryLTCUSD", "LTC/USD", "Cryptocurrencies", "Crypto"),
+    _ds("cryXRPUSD", "XRP/USD", "Cryptocurrencies", "Crypto"),
+    _ds("cryBCHUSD", "BCH/USD", "Cryptocurrencies", "Crypto"),
+    _ds("cryEOSUSD", "EOS/USD", "Cryptocurrencies", "Crypto"),
+    # Volatility / synthetic indices
+    _ds("R_10", "Volatility 10 Index", "Synthetic Indices", "Continuous Indices"),
+    _ds("R_25", "Volatility 25 Index", "Synthetic Indices", "Continuous Indices"),
+    _ds("R_50", "Volatility 50 Index", "Synthetic Indices", "Continuous Indices"),
+    _ds("R_75", "Volatility 75 Index", "Synthetic Indices", "Continuous Indices"),
+    _ds("R_100", "Volatility 100 Index", "Synthetic Indices", "Continuous Indices"),
+    _ds("1HZ10V", "Volatility 10 (1s) Index", "Synthetic Indices", "Continuous Indices"),
+    _ds("1HZ25V", "Volatility 25 (1s) Index", "Synthetic Indices", "Continuous Indices"),
+    _ds("1HZ50V", "Volatility 50 (1s) Index", "Synthetic Indices", "Continuous Indices"),
+    _ds("1HZ75V", "Volatility 75 (1s) Index", "Synthetic Indices", "Continuous Indices"),
+    _ds("1HZ100V", "Volatility 100 (1s) Index", "Synthetic Indices", "Continuous Indices"),
+    _ds("BOOM300N", "Boom 300 Index", "Synthetic Indices", "Boom/Crash"),
+    _ds("BOOM500", "Boom 500 Index", "Synthetic Indices", "Boom/Crash"),
+    _ds("BOOM1000", "Boom 1000 Index", "Synthetic Indices", "Boom/Crash"),
+    _ds("CRASH300N", "Crash 300 Index", "Synthetic Indices", "Boom/Crash"),
+    _ds("CRASH500", "Crash 500 Index", "Synthetic Indices", "Boom/Crash"),
+    _ds("CRASH1000", "Crash 1000 Index", "Synthetic Indices", "Boom/Crash"),
+    _ds("stpRNG", "Step Index", "Synthetic Indices", "Step"),
+    _ds("JD10", "Jump 10 Index", "Synthetic Indices", "Jump"),
+    _ds("JD25", "Jump 25 Index", "Synthetic Indices", "Jump"),
+    _ds("JD50", "Jump 50 Index", "Synthetic Indices", "Jump"),
+    _ds("JD75", "Jump 75 Index", "Synthetic Indices", "Jump"),
+    _ds("JD100", "Jump 100 Index", "Synthetic Indices", "Jump"),
+    _ds("RDBEAR", "Bear Market Index", "Synthetic Indices", "Daily Reset"),
+    _ds("RDBULL", "Bull Market Index", "Synthetic Indices", "Daily Reset"),
+    # Forex majors
+    _ds("frxEURUSD", "EUR/USD", "Forex", "Majors"),
+    _ds("frxGBPUSD", "GBP/USD", "Forex", "Majors"),
+    _ds("frxUSDJPY", "USD/JPY", "Forex", "Majors"),
+    _ds("frxAUDUSD", "AUD/USD", "Forex", "Majors"),
+    _ds("frxUSDCAD", "USD/CAD", "Forex", "Majors"),
+    _ds("frxUSDCHF", "USD/CHF", "Forex", "Majors"),
+    _ds("frxNZDUSD", "NZD/USD", "Forex", "Majors"),
+    _ds("frxEURGBP", "EUR/GBP", "Forex", "Minors"),
+    _ds("frxEURJPY", "EUR/JPY", "Forex", "Minors"),
+    _ds("frxGBPJPY", "GBP/JPY", "Forex", "Minors"),
+    # Stock indices
+    _ds("OTC_SPC", "US 500", "Stock Indices", "Americas"),
+    _ds("OTC_NDX", "US Tech 100", "Stock Indices", "Americas"),
+    _ds("OTC_DJI", "Wall Street 30", "Stock Indices", "Americas"),
+    _ds("OTC_FTSE", "UK 100", "Stock Indices", "Europe"),
+    _ds("OTC_GDAXI", "Germany 40", "Stock Indices", "Europe"),
+    _ds("OTC_N225", "Japan 225", "Stock Indices", "Asia"),
+    _ds("OTC_HSI", "Hong Kong 50", "Stock Indices", "Asia"),
+    _ds("OTC_AS51", "Australia 200", "Stock Indices", "Asia"),
+]
+
+
 def _is_deriv_symbol(sym: str) -> bool:
     if not sym:
         return False
@@ -98,7 +165,9 @@ async def get_deriv_symbols():
     if _deriv_sym_cache["list"] and now - _deriv_sym_cache["t"] < 3600:
         return _deriv_sym_cache["list"]
     if now - _deriv_sym_cache.get("fail_t", 0) < 60:  # negative cache: don't hammer a down server
-        return _deriv_sym_cache["list"] or []
+        fallback = _deriv_sym_cache["list"] or DERIV_FALLBACK_SYMBOLS
+        _deriv_symbol_set.update(s["symbol"] for s in fallback)
+        return fallback
     try:
         resp = await asyncio.wait_for(
             _deriv_call({"active_symbols": "brief", "product_type": "basic"}, timeout=5), 6)
@@ -115,8 +184,10 @@ async def get_deriv_symbols():
         return out
     except Exception as e:  # noqa
         _deriv_sym_cache["fail_t"] = now
-        logger.warning(f"Deriv active_symbols failed: {e}")
-        return _deriv_sym_cache["list"] or []
+        logger.warning(f"Deriv active_symbols failed: {e}; serving static instrument list")
+        fallback = _deriv_sym_cache["list"] or DERIV_FALLBACK_SYMBOLS
+        _deriv_symbol_set.update(s["symbol"] for s in fallback)
+        return fallback
 
 
 async def _get_deriv_candles(symbol: str, timeframe: str, limit: int, closed_only: bool):
@@ -228,6 +299,48 @@ async def get_candles(symbol: str, timeframe: str, limit: int = 300, closed_only
     health.update({"last_ok": now, "source": source, "error": None})
     _cache[key] = (now, candles)
     return candles
+
+
+_live_cache: dict = {}
+_LIVE_TTL = 3  # seconds — near-real-time price/forming candle
+
+
+async def get_live(symbol: str, timeframe: str):
+    """Current price + the in-progress (forming) candle. Short TTL for near-real-time.
+    Deriv may be unreachable here; returns price=None gracefully in that case."""
+    if timeframe not in TIMEFRAMES:
+        raise ValueError(f"Unsupported timeframe: {timeframe}")
+    key = f"{symbol.upper()}:{timeframe}"
+    now = time.time()
+    cached = _live_cache.get(key)
+    if cached and now - cached[0] < _LIVE_TTL:
+        return cached[1]
+
+    candle = None
+    source = None
+    if _is_deriv_symbol(symbol):
+        try:
+            rows = await asyncio.wait_for(
+                _get_deriv_candles(symbol, timeframe, 2, closed_only=False), 6)
+            if rows:
+                candle, source = rows[-1], "deriv"
+        except Exception as e:  # noqa
+            logger.warning(f"Deriv live fetch failed for {symbol}: {e}")
+    else:
+        for name, fetch in (("binance.us", _fetch_binance), ("coinbase", _fetch_coinbase)):
+            try:
+                rows = await fetch(symbol, timeframe, 2)  # includes the forming candle
+                if rows:
+                    candle, source = rows[-1], name
+                    break
+            except Exception as e:  # noqa
+                logger.warning(f"{name} live fetch failed for {symbol}: {e}")
+
+    out = {"symbol": symbol, "timeframe": timeframe,
+           "price": (candle["c"] if candle else None),
+           "candle": candle, "source": source, "server_ts": int(now * 1000)}
+    _live_cache[key] = (now, out)
+    return out
 
 
 async def get_last_price(symbol: str):

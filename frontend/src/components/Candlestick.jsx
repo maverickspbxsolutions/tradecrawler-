@@ -3,7 +3,7 @@ import { useRef, useState, useEffect } from "react";
 const GREEN = "#00E676";
 const RED = "#FF3366";
 
-export function Candlestick({ candles, height = 240 }) {
+export function Candlestick({ candles, height = 240, liveLast = false }) {
   const ref = useRef(null);
   const [w, setW] = useState(800);
   const [hover, setHover] = useState(null);
@@ -87,10 +87,26 @@ export function Candlestick({ candles, height = 240 }) {
           const yL = yFor(c.l);
           const top = Math.min(yFor(c.o), yFor(c.c));
           const bh = Math.max(1, Math.abs(yFor(c.c) - yFor(c.o)));
+          const isLive = liveLast && i === n - 1;
           return (
             <g key={i}>
-              <line x1={x} y1={yH} x2={x} y2={yL} stroke={color} strokeWidth={1} />
-              <rect x={x - bw / 2} y={top} width={bw} height={bh} fill={color} />
+              <line x1={x} y1={yH} x2={x} y2={yL} stroke={color} strokeWidth={1} opacity={isLive ? 0.9 : 1} />
+              <rect
+                x={x - bw / 2}
+                y={top}
+                width={bw}
+                height={bh}
+                fill={color}
+                fillOpacity={isLive ? 0.4 : 1}
+                stroke={isLive ? color : "none"}
+                strokeWidth={isLive ? 1 : 0}
+                strokeDasharray={isLive ? "2 2" : undefined}
+              />
+              {isLive && (
+                <circle cx={x} cy={yFor(c.c)} r={3} fill={color}>
+                  <animate attributeName="opacity" values="1;0.25;1" dur="1.2s" repeatCount="indefinite" />
+                </circle>
+              )}
             </g>
           );
         })}
