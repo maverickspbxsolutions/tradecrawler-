@@ -1,0 +1,32 @@
+{
+  "summary": "Frontend-only re-test of incremental changes (direct Resend email, searchable 202-symbol combobox, dashboard regression). All five requested flows pass end-to-end against the public preview URL.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "verifications": {
+    "login_redirect_and_dashboard_render": "PASS - login with xambiep90/Reddestroad1$ redirects to '/' and candlestick-chart, new-strategy-btn, open-settings-btn, evolve-now-btn, strategy cards, backtest, paper trading, adaptive evolution panels all render.",
+    "symbol_combobox": "PASS - data-testid=symbol-combobox defaults to BTCUSDT. Clicking opens popover with symbol-search input. Initial options count: 202 (matches backend). Typing 'SOL' filters to a single option (symbol-option-SOLUSDT). Selecting it updates combobox text to SOLUSDT.",
+    "create_strategy_with_selected_symbol": "PASS - After filling NAME ('TEST SOL Strategy') and selecting SOLUSDT, save-strategy-btn creates the strategy, toast 'Strategy created' shows, new card appears in list (count went from 3 -> 4) and a SOLUSDT signal (RSI(14) above 70) was emitted into the Signal Feed.",
+    "settings_direct_resend_test_email": "PASS - open-settings-btn opens Alert Settings dialog with ALERT EMAIL input (data-testid=alert-email-input). Set to delivered@resend.dev, save-settings-btn => toast 'Settings saved'. test-email-btn => POST /api/alerts/test -> HTTP 200 body {\"sent\":true,\"email_id\":\"01a1030d-eac5-7a2e-8dc0-eaa595042e1b\"} and toast 'Test email sent' appears. Confirms direct Resend integration.",
+    "regression_chart_and_evolution": "PASS - Selecting SOLUSDT strategy card updates candlestick-chart header to SOLUSDT $119.96. Backtest panel shows strategy equity curve and metrics. 'Evolve Now' (evolve-now-btn) runs and renders regime badges (SIDEWAYS, VOL LOW, STRENGTH 1) and Fitness-per-generation chart with Best/Avg lines. OOS fitness and candidate stats shown."
+  },
+  "console_notes": [
+    "One benign 404 observed in console (likely favicon or optional asset); did not affect any flow."
+  ],
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "SymbolCombobox renders all 202 options inside the cmdk list; works fine but consider virtualization if symbol count grows significantly.",
+    "StrategyFormDialog shows 'Name required' toast only after submit — minor UX; inline validation would be clearer but not blocking."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "not re-tested (per request)", "frontend": "100% (5/5 requested flows)"},
+  "test_credentials": "xambiep90 / Reddestroad1$ (shared login); email recipient delivered@resend.dev",
+  "seed_data_creation": "Temporarily created strategy 'TEST SOL Strategy' on SOLUSDT; deleted during cleanup at end of test run.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All frontend incremental changes (direct Resend, 202-symbol searchable combobox with BTCUSDT default, dashboard regression incl. Evolve Now) verified working against public URL. Backend was fully green in iteration_1 and /api/alerts/test confirmed returning sent:true with email_id. No frontend code modified."
+}
