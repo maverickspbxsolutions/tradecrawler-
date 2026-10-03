@@ -43,8 +43,25 @@ export function SettingsDialog({ open, onOpenChange }) {
   const test = useMutation({
     mutationFn: () => api.post("/alerts/test"),
     onSuccess: (r) => toast.success(`Test email sent to ${r.data.recipients?.length || 0} address(es)`),
-    onError: (e) => toast.error(e.response?.data?.detail || "Could not send"),
+    onError: (e) => toast.error(e.response?.data?.detail || e.message || "Could not send"),
   });
+
+  const runTest = async () => {
+    let emails = form.alert_emails;
+    const e = newEmail.trim();
+    if (e && e.includes("@") && !emails.includes(e)) {
+      emails = [...emails, e];
+      setForm({ ...form, alert_emails: emails });
+      setNewEmail("");
+      await api.put("/settings", { alert_emails: emails });
+      qc.invalidateQueries({ queryKey: ["settings"] });
+    }
+    if (emails.length === 0) {
+      toast.error("Add an email address first");
+      return;
+    }
+    test.mutate();
+  };
 
   if (!form) return null;
   const set = (k, v) => setForm({ ...form, [k]: v });
@@ -113,7 +130,7 @@ export function SettingsDialog({ open, onOpenChange }) {
               <p className="text-[10px] text-muted-foreground max-w-[70%]">
                 Sent from your Resend account. To reach any inbox, verify a domain in Resend and set RESEND_FROM_EMAIL.
               </p>
-              <Button variant="outline" className="h-8 rounded-sm" onClick={() => test.mutate()} disabled={test.isPending} data-testid="test-email-btn">
+              <Button variant="outline" className="h-8 rounded-sm" onClick={runTest} disabled={test.isPending} data-testid="test-email-btn">
                 <Send className="h-3.5 w-3.5 mr-1" /> Send test
               </Button>
             </div>

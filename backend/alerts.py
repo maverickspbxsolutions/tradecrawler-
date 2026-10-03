@@ -16,9 +16,9 @@ logger = logging.getLogger(__name__)
 
 # Direct Resend integration (independent of Emergent) — uses the user's own key.
 RESEND_URL = "https://api.resend.com/emails"
-RESEND_API_KEY = os.environ["RESEND_API_KEY"]
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY")
 RESEND_FROM_EMAIL = os.environ.get("RESEND_FROM_EMAIL", "onboarding@resend.dev")
-EMAIL_FROM_NAME = os.environ["EMAIL_FROM_NAME"]
+EMAIL_FROM_NAME = os.environ.get("EMAIL_FROM_NAME", "TradeCrawler")
 EMAIL_FROM = f"{EMAIL_FROM_NAME} <{RESEND_FROM_EMAIL}>"
 EMAIL_REPLY_TO = os.environ.get("EMAIL_REPLY_TO")
 
@@ -97,17 +97,27 @@ def _assert_safe_email(subject: str, html: str) -> None:
 
 async def send_email(*, to, subject: str, html: str) -> str | None:
     _assert_safe_email(subject, html)
+    key = RESEND_API_KEY or os.environ.get("RESEND_API_KEY")
+    if not key:
+        raise RuntimeError("Email isn't set up yet — add RESEND_API_KEY to your deployment secrets.")
     recipients = to if isinstance(to, list) else [to]
-    payload = {"from": EMAIL_FROM, "to": recipients, "subject": subject, "html": html}
+    from_email = os.environ.get("RESEND_FROM_EMAIL", RESEND_FROM_EMAIL)
+    from_name = os.environ.get("EMAIL_FROM_NAME", EMAIL_FROM_NAME)
+    payload = {"from": f"{from_name} <{from_email}>", "to": recipients, "subject": subject, "html": html}
     if EMAIL_REPLY_TO:
         payload["reply_to"] = EMAIL_REPLY_TO
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.post(
             RESEND_URL,
-            headers={"Authorization": f"Bearer {RESEND_API_KEY}", "Content-Type": "application/json"},
+            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
             json=payload,
         )
-    resp.raise_for_status()
+    if resp.status_code >= 400:
+        try:
+            msg = resp.json().get("message") or resp.text
+        except Exception:  # noqa
+            msg = resp.text
+        raise RuntimeError(msg or f"Resend returned {resp.status_code}")
     return resp.json().get("id")
 
 
