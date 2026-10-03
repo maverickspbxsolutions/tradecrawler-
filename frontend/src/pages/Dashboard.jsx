@@ -7,6 +7,7 @@ import { HowItWorks } from "@/components/HowItWorks";
 import { StatsBar } from "@/components/StatsBar";
 import { PriceChart } from "@/components/PriceChart";
 import { SignalFeed } from "@/components/SignalFeed";
+import { MiniSimulations } from "@/components/MiniSimulations";
 import { StrategyList } from "@/components/StrategyList";
 import { BacktestPanel } from "@/components/BacktestPanel";
 import { PaperPanel } from "@/components/PaperPanel";
@@ -55,6 +56,7 @@ export default function Dashboard() {
           <div className="lg:col-span-8 space-y-3">
             <PriceChart symbol={selected?.symbol || "BTCUSDT"} timeframe={selected?.timeframe || "1h"} />
             <SignalFeed />
+            <MiniSimulations strategy={selected} />
           </div>
           <div className="lg:col-span-4">
             <StrategyList

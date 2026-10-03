@@ -2,6 +2,7 @@
 import asyncio
 import uuid
 from datetime import datetime, timezone, timedelta
+import numpy as np
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -157,6 +158,58 @@ async def get_backtest(sid: str):
     if not bt:
         raise HTTPException(404, "No backtest yet")
     return bt
+
+
+@api.get("/strategies/{sid}/simulate")
+async def simulate(sid: str, trades: int = 20, paths: int = 400, capital: float = 20.0):
+    """Quick Monte-Carlo: stake `capital` across `trades` future trades, bootstrapped
+    from the strategy's historical trade returns (or win/avg model). Returns a few
+    sample equity paths + outcome stats."""
+    s = await db.strategies.find_one({"id": sid}, {"_id": 0})
+    if not s:
+        raise HTTPException(404, "Strategy not found")
+    bt = await db.backtests.find_one({"strategy_id": sid}, {"_id": 0})
+    trades = max(5, min(trades, 60))
+    paths = max(50, min(paths, 1000))
+
+    returns = []
+    if bt and bt.get("trades"):
+        returns = [t["return_pct"] for t in bt["trades"] if isinstance(t.get("return_pct"), (int, float))]
+    if len(returns) < 3 and bt:
+        wr = (bt.get("win_rate") or 0) / 100.0
+        aw = bt.get("avg_win_pct") or 2.5
+        al = bt.get("avg_loss_pct") or -1.5
+        nwin = max(1, int(round(wr * 20)))
+        returns = [aw] * nwin + [al] * max(1, 20 - nwin)
+    if not returns:
+        raise HTTPException(400, "Run a test first so there's data to simulate")
+
+    arr = np.array(returns, dtype=float) / 100.0
+    rng = np.random.default_rng()
+    draws = rng.choice(arr, size=(paths, trades), replace=True)
+    equity = np.concatenate(
+        [np.full((paths, 1), capital), np.cumprod(1.0 + draws, axis=1) * capital], axis=1)
+    ending = equity[:, -1]
+    order = np.argsort(ending)
+
+    stats = {
+        "capital": capital,
+        "trades": trades,
+        "paths": paths,
+        "median": round(float(np.median(ending)), 2),
+        "p10": round(float(np.percentile(ending, 10)), 2),
+        "p90": round(float(np.percentile(ending, 90)), 2),
+        "best": round(float(ending.max()), 2),
+        "worst": round(float(ending.min()), 2),
+        "prob_profit": round(float((ending > capital).mean() * 100), 1),
+        "avg_trade_pct": round(float(arr.mean() * 100), 3),
+        "sample_size": len(returns),
+    }
+    picks = [order[int(q * (paths - 1))] for q in (0.05, 0.2, 0.35, 0.5, 0.65, 0.8, 0.95)]
+    sample_paths = [{"id": f"p{i}", "points": [round(float(x), 4) for x in equity[idx]]}
+                    for i, idx in enumerate(picks)]
+    median_path = [round(float(x), 4) for x in equity[order[paths // 2]]]
+    return {"stats": stats, "sample_paths": sample_paths, "median_path": median_path}
 
 
 @api.post("/strategies/{sid}/scan")

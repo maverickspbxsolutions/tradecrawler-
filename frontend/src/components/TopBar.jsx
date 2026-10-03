@@ -1,11 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
-import { Activity, LogOut, Settings, Radio, Database } from "lucide-react";
+import { Activity, LogOut, Settings, Radio, Database, Sun, Moon } from "lucide-react";
+import { useTheme } from "next-themes";
 import { api } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 
 export function TopBar({ onOpenSettings }) {
   const { user, logout } = useAuth();
+  const { resolvedTheme, setTheme } = useTheme();
+  const isLight = resolvedTheme === "light";
   const { data: health } = useQuery({
     queryKey: ["health"],
     queryFn: async () => (await api.get("/market/health")).data,
@@ -42,6 +45,16 @@ export function TopBar({ onOpenSettings }) {
               <Radio className="h-3 w-3" /> {stale ? "data delayed" : "watching 24/7"}
             </span>
           </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 px-2 rounded-sm"
+            onClick={() => setTheme(isLight ? "dark" : "light")}
+            data-testid="theme-toggle-btn"
+            title={isLight ? "Switch to dark" : "Switch to light"}
+          >
+            {isLight ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
+          </Button>
           <Button
             variant="ghost"
             size="sm"

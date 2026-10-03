@@ -4,10 +4,6 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-    color-scheme: dark;
-}
-
 body {
     margin: 0;
     font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -21,6 +17,34 @@ code, .mono {
 
 @layer base {
     :root {
+        color-scheme: light;
+        --background: 240 20% 98%;
+        --foreground: 240 12% 12%;
+        --card: 0 0% 100%;
+        --card-foreground: 240 12% 12%;
+        --popover: 0 0% 100%;
+        --popover-foreground: 240 12% 12%;
+        --primary: 190 95% 36%;
+        --primary-foreground: 0 0% 100%;
+        --secondary: 240 14% 94%;
+        --secondary-foreground: 240 12% 12%;
+        --muted: 240 14% 94%;
+        --muted-foreground: 240 6% 42%;
+        --accent: 240 14% 92%;
+        --accent-foreground: 240 12% 12%;
+        --destructive: 345 85% 48%;
+        --destructive-foreground: 0 0% 100%;
+        --border: 240 12% 86%;
+        --input: 240 12% 82%;
+        --ring: 190 95% 36%;
+        --radius: 0.25rem;
+        --buy: 150 84% 32%;
+        --sell: 345 85% 48%;
+        --warn: 48 100% 50%;
+    }
+
+    .dark {
+        color-scheme: dark;
         --background: 240 11% 4%;
         --foreground: 0 0% 93%;
         --card: 240 9% 7%;
@@ -54,30 +78,29 @@ code, .mono {
     body {
         @apply bg-background text-foreground;
         background-image:
-            linear-gradient(rgba(255,255,255,0.012) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(255,255,255,0.012) 1px, transparent 1px);
+            linear-gradient(hsl(var(--foreground) / 0.035) 1px, transparent 1px),
+            linear-gradient(90deg, hsl(var(--foreground) / 0.035) 1px, transparent 1px);
         background-size: 40px 40px;
     }
 }
 
 ::selection {
-    background: hsl(187 100% 50% / 0.25);
-    color: #fff;
+    background: hsl(var(--primary) / 0.22);
 }
 
 ::-webkit-scrollbar { width: 9px; height: 9px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: hsl(240 9% 18%); border-radius: 2px; }
-::-webkit-scrollbar-thumb:hover { background: hsl(240 9% 26%); }
+::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground) / 0.5); }
 
 .num { font-family: 'Azeret Mono', monospace; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
 
 @keyframes flash-buy {
-    from { background-color: hsl(151 100% 45% / 0.18); }
+    from { background-color: hsl(var(--buy) / 0.18); }
     to { background-color: transparent; }
 }
 @keyframes flash-sell {
-    from { background-color: hsl(345 100% 60% / 0.18); }
+    from { background-color: hsl(var(--sell) / 0.18); }
     to { background-color: transparent; }
 }
 .flash-buy { animation: flash-buy 1.6s ease-out; }
