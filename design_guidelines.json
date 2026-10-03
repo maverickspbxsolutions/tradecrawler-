@@ -1,0 +1,159 @@
+{
+  "theme_strategy": {
+    "mode": "dark-only",
+    "rationale": "A clean, dark 'trading terminal' aesthetic requires a dark-first environment to reduce eye strain during long sessions and prioritize fast, scannable data visualization.",
+    "archetype": "ARCHETYPE 5 (LUXURY / DEEP DARK) + ARCHETYPE 7 (ELECTRIC/TERMINAL ACCENTS)",
+    "vibe": "Technical, precise, institutional yet cutting-edge."
+  },
+  "typography": {
+    "fonts": {
+      "headings_and_data": "Azeret Mono",
+      "body": "IBM Plex Sans",
+      "forbidden_fonts": ["Inter (for headings)", "Space Grotesk"]
+    },
+    "hierarchy": {
+      "h1": "text-3xl sm:text-4xl tracking-tight font-bold",
+      "h2": "text-xl sm:text-2xl tracking-tight font-semibold",
+      "h3": "text-lg tracking-tight font-medium",
+      "data_large": "text-2xl sm:text-3xl font-mono tracking-tighter",
+      "data_medium": "text-xl font-mono tracking-tighter",
+      "body": "text-sm sm:text-base leading-relaxed",
+      "labels": "text-xs font-mono uppercase tracking-[0.1em] text-muted-foreground",
+      "disclaimer_banner": "text-xs sm:text-sm font-mono uppercase tracking-[0.2em] font-bold"
+    },
+    "rules": [
+      "Use Azeret Mono for all numerical data, tickers, and prices to ensure tabular alignment.",
+      "Use IBM Plex Sans for descriptive body text, tooltips, and standard paragraphs.",
+      "Never default to bold for headers; use varied weights like Light or Black for tension."
+    ]
+  },
+  "colors": {
+    "backgrounds": {
+      "page_bg": "#0A0A0C",
+      "card_bg": "#121215",
+      "header_bg": "#0A0A0C",
+      "hover_bg": "#1A1A1F"
+    },
+    "text": {
+      "primary": "#EDEDED",
+      "secondary": "#8A8A93",
+      "muted": "#565660"
+    },
+    "borders": {
+      "default": "#1F1F24",
+      "focus": "#00E5FF",
+      "active": "#33333C"
+    },
+    "semantic": {
+      "buy_profit": "#00E676",
+      "sell_loss": "#FF3366",
+      "accent_cyan": "#00E5FF",
+      "warning_banner": "#FFE600"
+    },
+    "forbidden_colors": [
+      "#7351B7",
+      "#1B93A4"
+    ],
+    "rules": [
+      "No pure black (#000000). Always use tinted darks.",
+      "Color is Function Only: 90% of the UI should be monochrome. Use Green/Red exclusively for market direction and profit/loss.",
+      "Use warning yellow (#FFE600) exclusively for the 'Not Financial Advice' banner and critical alerts."
+    ]
+  },
+  "visual_enhancers": {
+    "surfaces": [
+      {
+        "name": "Grid Borders (Technical Look)",
+        "usage": "Dashboard data panels and strategy cards",
+        "css": "border border-border/40 bg-card rounded-none or rounded-sm shadow-none"
+      },
+      {
+        "name": "Solid Backgrounds",
+        "usage": "Headers and Sticky navigation",
+        "css": "bg-background border-b border-border/60 backdrop-blur-none"
+      }
+    ],
+    "textures": [
+      "Subtle noise overlay (opacity 2-3%) on the main background to break pure digital flatness."
+    ],
+    "rules": [
+      "Avoid heavy gradients. Use 1px solid borders to separate regions.",
+      "No Glassmorphism. Trading terminals need optical clarity, not blur.",
+      "Never use complete transparent backgrounds for overlays or headers."
+    ]
+  },
+  "grids_and_layouts": {
+    "strategy": "High Density Grid (For Dashboards & Analytics)",
+    "container": "w-full max-w-[1920px] mx-auto px-4 sm:px-6",
+    "dashboard_grid": "grid grid-cols-1 md:grid-cols-12 gap-1 md:gap-4",
+    "panel_spans": {
+      "signal_feed": "col-span-12 lg:col-span-9 row-span-2",
+      "strategy_cards": "col-span-12 lg:col-span-3",
+      "backtest_results": "col-span-12 lg:col-span-6",
+      "paper_trading": "col-span-12 lg:col-span-6"
+    },
+    "spacing_scale": "Tightly packed for data (p-3 to p-4 inside panels), but generous macro spacing (gap-4).",
+    "rules": [
+      "Use 'border-collapse' style or tight 1px gaps between panels for a Bloomberg-terminal feel.",
+      "Keep the 'Signals are not financial advice' banner sticky at the absolute top of the viewport."
+    ]
+  },
+  "components": {
+    "overrides": {
+      "cards": "Remove default large border-radii. Use rounded-sm (2px) or sharp edges. Remove drop-shadows. Rely on 1px borders.",
+      "buttons": "Sharp edges (rounded-sm), high contrast hover states (e.g., hover:bg-white hover:text-black).",
+      "tables": "Dense rows, tabular numbers (font-mono), explicit right-alignment for numerical columns.",
+      "toggles": "Custom styled switch for Strategy On/Off. Green when active, muted grey when off."
+    },
+    "libraries": [
+      "lucide-react (Icons)",
+      "lightweight-charts or recharts (for Candlestick and Equity curve charting)",
+      "Shadcn UI (Tabs, Select, Switch, Dialog)"
+    ]
+  },
+  "motion": {
+    "philosophy": "Minimalist and functional.",
+    "rules": [
+      "Micro-interactions only. Hover states must be instant or very fast (0.1s).",
+      "New signals in the feed should flash briefly (e.g., bg-green-500/20 to transparent) to draw attention.",
+      "No bouncy or sweeping layout animations. Keep it rigid and professional."
+    ]
+  },
+  "accessibility": {
+    "contrast": "Ensure all text meets APCA/WCAG AA standards. Gray text must be light enough against the dark background.",
+    "focus": "focus-visible:ring-1 focus-visible:ring-accent_cyan focus-visible:outline-none",
+    "testing": "All interactive and key informational elements MUST include a `data-testid` attribute (e.g., data-testid='strategy-toggle-rsi')."
+  },
+  "media_and_icons": {
+    "icon_library": "lucide-react",
+    "image_urls": {
+      "login_hero": {
+        "url": "https://images.unsplash.com/photo-1763888450809-4125d93fa56b?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2OTF8MHwxfHNlYXJjaHwxfHxhYnN0cmFjdCUyMHRyYWRpbmclMjBjaGFydCUyMGRhcmslMjBiYWNrZ3JvdW5kfGVufDB8fHx8MTc5MTA1MDI3NXww&ixlib=rb-4.1.0&q=85",
+        "description": "Abstract streaks of blue and red light for the login page background.",
+        "category": "backgrounds"
+      }
+    }
+  },
+  "instructions_to_main_agent": [
+    "1. Setup the layout with a sticky warning banner at the top: 'SIGNALS ARE NOT FINANCIAL ADVICE'. Style it with a yellow background and black text for high urgency.",
+    "2. Build the main dashboard using a strict grid layout. Left/Center side should house the main Signal Feed and Chart. Right side should house Strategy Configuration Cards.",
+    "3. Use a lightweight charting library (e.g., lightweight-charts by TradingView or Recharts) to render the candlestick price charts and equity curves.",
+    "4. For strategy configuration, build compact, dense cards with On/Off switches (Shadcn Switch) and metric displays (Expectancy, Win Rate, Max Drawdown).",
+    "5. Use Azeret Mono for all numeric values and table cells. Explicitly right-align numeric columns.",
+    "6. Ensure all components use sharp edges (rounded-none or rounded-sm) and rely on 1px borders instead of drop-shadows to achieve the 'terminal' look.",
+    "7. Implement a strict dark mode using the provided color palette (page_bg: #0A0A0C). Do not add a light mode.",
+    "8. Add `data-testid` attributes to all actionable elements (toggles, buttons, tabs) and key data points."
+  ],
+  "UNIVERSAL_GUIDELINES_FOR_MAIN_AGENT": [
+    "You tend to converge toward generic, 'on distribution' outputs. Avoid this: make creative, distinctive frontends that surprise and delight.",
+    "Dark colors look good when used independently without gradients. DO NOT use dark colors as gradients.",
+    "Don't make generic centered layouts, simplistic gradients, and uniform styling.",
+    "Create depth through layered design elements with z-index hierarchy.",
+    "You MUST NOT apply universal transition. Eg: transition: all. Always add transitions for specific interactive elements like button, input excluding transforms.",
+    "You MUST NOT center align the app container, ie do not add .App { text-align: center; } in the css file.",
+    "NEVER use AI assistant Emoji characters like 🤖🧠💭💡🔮🎯 etc for icons.",
+    "Every interaction needs micro-animations - hover states, transitions, parallax effects, and entrance animations.",
+    "Prioritize using pre-existing components from src/components/ui when applicable.",
+    "Use sonner for toasts. Sonner component are located in /app/src/components/ui/sonner.tsx"
+  ]
+}

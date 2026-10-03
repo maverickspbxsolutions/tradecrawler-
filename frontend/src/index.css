@@ -1,0 +1,94 @@
+@import url('https://fonts.googleapis.com/css2?family=Azeret+Mono:wght@300;400;500;600;700&family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+    color-scheme: dark;
+}
+
+body {
+    margin: 0;
+    font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+code, .mono {
+    font-family: 'Azeret Mono', monospace;
+}
+
+@layer base {
+    :root {
+        --background: 240 11% 4%;
+        --foreground: 0 0% 93%;
+        --card: 240 9% 7%;
+        --card-foreground: 0 0% 93%;
+        --popover: 240 10% 6%;
+        --popover-foreground: 0 0% 93%;
+        --primary: 187 100% 50%;
+        --primary-foreground: 240 11% 4%;
+        --secondary: 240 8% 12%;
+        --secondary-foreground: 0 0% 93%;
+        --muted: 240 8% 12%;
+        --muted-foreground: 240 5% 58%;
+        --accent: 240 8% 14%;
+        --accent-foreground: 0 0% 98%;
+        --destructive: 345 100% 60%;
+        --destructive-foreground: 0 0% 100%;
+        --border: 240 9% 13%;
+        --input: 240 9% 16%;
+        --ring: 187 100% 50%;
+        --radius: 0.25rem;
+        --buy: 151 100% 45%;
+        --sell: 345 100% 60%;
+        --warn: 56 100% 50%;
+    }
+}
+
+@layer base {
+    * {
+        @apply border-border;
+    }
+    body {
+        @apply bg-background text-foreground;
+        background-image:
+            linear-gradient(rgba(255,255,255,0.012) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(255,255,255,0.012) 1px, transparent 1px);
+        background-size: 40px 40px;
+    }
+}
+
+::selection {
+    background: hsl(187 100% 50% / 0.25);
+    color: #fff;
+}
+
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: hsl(240 9% 18%); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: hsl(240 9% 26%); }
+
+.num { font-family: 'Azeret Mono', monospace; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+
+@keyframes flash-buy {
+    from { background-color: hsl(151 100% 45% / 0.18); }
+    to { background-color: transparent; }
+}
+@keyframes flash-sell {
+    from { background-color: hsl(345 100% 60% / 0.18); }
+    to { background-color: transparent; }
+}
+.flash-buy { animation: flash-buy 1.6s ease-out; }
+.flash-sell { animation: flash-sell 1.6s ease-out; }
+
+@keyframes fade-up {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+.fade-up { animation: fade-up 0.4s ease-out both; }
+
+@layer base {
+    [data-debug-wrapper="true"] { display: contents !important; }
+}
