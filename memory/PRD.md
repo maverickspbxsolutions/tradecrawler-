@@ -186,6 +186,22 @@ Approve-each-trade engine on the connected Deriv MT5 DEMO account via MetaApi.
 - Spam control: per (symbol, side) cooldown (>=30m) + existing daily email cap (50). Dedup keeps exactly
   one pending proposal per symbol+side (verified).
 
+## Intraday day-trade timeframe + MT5 robustness (BUILT — 2026-10-04, agent-tested)
+- Trade engine now runs on an INTRADAY timeframe: `risk_config.TRADE_TIMEFRAME = "15m"`,
+  `SIM_HORIZON_BARS = 20` (~5 hours). Profit/odds/sim are measured over a 30min-5h window (the user
+  day-trades 30min-5h holds), NOT 24h.
+- `_predict` returns `est_hold_bars` (median bars-to-resolution); propose converts via `_tf_minutes` and
+  shows a hold label (e.g. "~1h 45m"). Added to proposal, email ("Typical hold: ~Xh"), and UI ("Hold ≈").
+  Verified live: SELL Volatility 100 proposal showed HOLD ~1h 45m, risk $12.45, 90% sim odds, +1.23R.
+- `mt5_trader.mt5_symbol` passes through MT5 names; all scans use TRADE_TIMEFRAME.
+- ROBUSTNESS (important): every MT5 RPC call is now wrapped in `asyncio.wait_for` (RPC_TIMEOUT 15s,
+  order/close 30s) and `ensure()`/`_connect` have CONNECT_TIMEOUT 60s + CONNECT_COOLDOWN 45s backoff.
+  Previously a degraded MetaApi->Deriv broker link made calls hang forever -> Cloudflare 502. Now
+  endpoints fail fast and the UI shows OFFLINE gracefully. Root cause of an outage seen this session was
+  broker-side ("Timed out waiting for account to connect to the broker", connected:false) and recovered
+  on its own — not a code bug.
+- Gold min-lot still forces ~$34 risk; crypto/synthetics size finely.
+
 ## Known Caveats
 - Deriv market data (Gold, Volatility Indices, forex, stock indices) is UNREACHABLE from the
   Emergent builder/preview egress (Cloudflare HTTP 520). Deriv instruments still appear in the picker

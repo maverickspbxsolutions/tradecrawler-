@@ -37,9 +37,12 @@ MIN_CONFIDENCE = 58
 MIN_WIN_PROB = 0.45          # breakeven for a 1.5 reward:risk is ~0.40
 MIN_EXPECTED_R = 0.05        # expected value must beat 0.05R
 
-# Forward Monte-Carlo prediction settings.
+# Forward Monte-Carlo prediction settings. Tuned for intraday day-trading:
+# 15-minute bars with a 20-bar (~5 hour) max horizon. Profit/odds are measured
+# over a 30-minute to 5-hour window, matching the user's typical hold time.
+TRADE_TIMEFRAME = "15m"
 SIM_PATHS = 600
-SIM_HORIZON_BARS = 24
+SIM_HORIZON_BARS = 20
 
 
 def suggest_lot(signal_confidence=None, volatility_pct=None) -> float:

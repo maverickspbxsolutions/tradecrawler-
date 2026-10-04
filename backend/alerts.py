@@ -275,6 +275,9 @@ def _proposal_html(prop: dict) -> str:
     win_line = (f'<p style="font-size:15px;margin:2px 0">Simulation: '
                 f'<strong>{int(win*100)}% win odds</strong>, '
                 f'<strong>{er:+.2f}R</strong> expected.</p>') if win is not None and er is not None else ""
+    hold = prop.get("hold_label")
+    hold_line = (f'<p style="font-size:15px;margin:2px 0">Typical hold: '
+                 f'<strong>{escape(str(hold))}</strong> (day-trade, 30min-5h).</p>') if hold else ""
     risk_line = (f'<p style="font-size:15px;margin:2px 0">Sized to risk about '
                  f'<strong>${risk:,.2f}</strong> if the stop-loss hits.</p>') if risk is not None else ""
 
@@ -292,7 +295,7 @@ def _proposal_html(prop: dict) -> str:
         f'<strong style="color:#00E676">{tp:,.4f}</strong> &middot; '
         f'Stop-loss: <strong style="color:#FF3366">{sl:,.4f}</strong>.</p>'
         f'<p style="font-size:15px;margin:2px 0">Confidence <strong>{conf}%</strong>.</p>'
-        f'{win_line}{risk_line}'
+        f'{win_line}{hold_line}{risk_line}'
         f'<div style="background:#00E5FF;color:#000;padding:12px;font-size:14px;'
         f'font-weight:bold;margin-top:16px;text-align:center;border-radius:6px">'
         f'Open TradeCrawler to APPROVE or REJECT this trade</div>'

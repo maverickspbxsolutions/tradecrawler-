@@ -33,7 +33,7 @@ async def get_risk_config():
 # ---------------- demo trade execution (approve-each-trade) ----------------
 class ProposeInput(BaseModel):
     symbol: str
-    timeframe: str = "1h"
+    timeframe: Optional[str] = None
 
 
 @api.get("/trades/account")

@@ -23,7 +23,6 @@ function Stat({ label, value, cls }) {
 export function TradePanel() {
   const qc = useQueryClient();
   const [busy, setBusy] = useState(null);
-  const [tf] = useState("1h");
 
   const { data: account } = useQuery({
     queryKey: ["trade-account"],
@@ -66,7 +65,7 @@ export function TradePanel() {
   const propose = async (symbol) => {
     setBusy(`propose-${symbol}`);
     try {
-      const { data } = await api.post("/trades/propose", { symbol, timeframe: tf });
+      const { data } = await api.post("/trades/propose", { symbol });
       toast.success(`${data.side} proposal ready for review — ${symbol}`);
       refresh();
     } catch (e) {
@@ -220,6 +219,9 @@ export function TradePanel() {
                     <div className="grid grid-cols-3 gap-2 mb-2">
                       <Stat label="Sim win odds" value={p.win_prob != null ? `${Math.round(p.win_prob * 100)}%` : "—"} cls="text-primary" />
                       <Stat label="Expected" value={p.expected_r != null ? `${p.expected_r >= 0 ? "+" : ""}${p.expected_r.toFixed(2)}R` : "—"} cls={pnlColor(p.expected_r)} />
+                      <Stat label="Hold ≈" value={p.hold_label || "—"} />
+                    </div>
+                    <div className="grid grid-cols-1 mb-2">
                       <Stat label="Risk ≈" value={p.est_risk_usd != null ? fmtUsd(p.est_risk_usd) : "—"} />
                     </div>
                     {p.reasons?.length > 0 && (

@@ -83,7 +83,7 @@ async def _connect():
             logger.info("MT5 RPC connection ready")
             return conn
         except Exception as e:  # noqa
-            _state.update(ready=False, connecting=False, error=str(e))
+            _state.update(ready=False, connecting=False, error=str(e), last_fail=time.time())
             logger.error(f"MT5 connect failed: {e}")
             raise
 
@@ -91,7 +91,17 @@ async def _connect():
 async def ensure():
     if _state["ready"] and _state["conn"]:
         return _state["conn"]
-    return await _connect()
+    # back off during a broker outage so requests fail fast instead of each
+    # waiting the full connect timeout
+    since_fail = time.time() - _state.get("last_fail", 0)
+    if since_fail < CONNECT_COOLDOWN:
+        raise RuntimeError("MT5 temporarily unavailable (broker reconnecting)")
+    return await asyncio.wait_for(_connect(), CONNECT_TIMEOUT)
+
+
+RPC_TIMEOUT = 15        # fail fast on a single RPC call instead of hanging
+CONNECT_TIMEOUT = 60    # first sync can be slow, but must not hang forever
+CONNECT_COOLDOWN = 45   # after a failed connect, reject fast for this long
 
 
 async def warmup():
@@ -102,24 +112,41 @@ async def warmup():
             pass
 
 
+async def _rpc(coro, timeout=None):
+    """Run an MT5 RPC with a hard timeout so a degraded connection can't hang
+    an HTTP request forever. On timeout, drop the cached connection so the next
+    call reconnects."""
+    try:
+        return await asyncio.wait_for(coro, timeout or RPC_TIMEOUT)
+    except asyncio.TimeoutError:
+        _state["ready"] = False
+        _state["error"] = "RPC timeout"
+        raise RuntimeError("MT5 request timed out")
+
+
 async def account_info():
     conn = await ensure()
-    return await conn.get_account_information()
+    return await _rpc(conn.get_account_information())
 
 
 async def positions():
     conn = await ensure()
-    return await conn.get_positions()
+    return await _rpc(conn.get_positions())
+
+
+async def deals_range(start, end):
+    conn = await ensure()
+    return await _rpc(conn.get_deals_by_time_range(start, end))
 
 
 async def price(sym: str):
     conn = await ensure()
-    return await conn.get_symbol_price(mt5_symbol(sym) or sym)
+    return await _rpc(conn.get_symbol_price(mt5_symbol(sym) or sym))
 
 
 async def symbol_spec(sym: str):
     conn = await ensure()
-    return await conn.get_symbol_specification(mt5_symbol(sym) or sym)
+    return await _rpc(conn.get_symbol_specification(mt5_symbol(sym) or sym))
 
 
 async def market_order(sym: str, side: str, volume: float, stop_loss=None,
@@ -130,13 +157,13 @@ async def market_order(sym: str, side: str, volume: float, stop_loss=None,
     if client_id:
         opts["clientId"] = client_id[:64]
     if side == "BUY":
-        return await conn.create_market_buy_order(s, volume, stop_loss, take_profit, opts)
-    return await conn.create_market_sell_order(s, volume, stop_loss, take_profit, opts)
+        return await _rpc(conn.create_market_buy_order(s, volume, stop_loss, take_profit, opts), timeout=30)
+    return await _rpc(conn.create_market_sell_order(s, volume, stop_loss, take_profit, opts), timeout=30)
 
 
 async def close_position(position_id: str):
     conn = await ensure()
-    return await conn.close_position(position_id)
+    return await _rpc(conn.close_position(position_id), timeout=30)
 
 
 # ---------------- market data (real Deriv prices via MT5) ----------------
@@ -151,7 +178,7 @@ def _to_ms(t) -> int:
 async def candles(symbol: str, timeframe: str, limit: int = 300, closed_only: bool = True):
     await ensure()
     acc = _state["account"]
-    rows = await acc.get_historical_candles(symbol, timeframe, None, min(limit + 1, 1000))
+    rows = await _rpc(acc.get_historical_candles(symbol, timeframe, None, min(limit + 1, 1000)))
     out = []
     for c in rows or []:
         out.append({"t": _to_ms(c.get("time")), "o": float(c["open"]), "h": float(c["high"]),
@@ -165,7 +192,7 @@ async def candles(symbol: str, timeframe: str, limit: int = 300, closed_only: bo
 
 async def live_price(symbol: str):
     conn = await ensure()
-    p = await conn.get_symbol_price(symbol)
+    p = await _rpc(conn.get_symbol_price(symbol))
     bid = p.get("bid")
     ask = p.get("ask")
     mid = (bid + ask) / 2 if bid is not None and ask is not None else (bid or ask)
@@ -176,7 +203,7 @@ async def get_universe():
     if _universe["list"] and time.time() - _universe["t"] < 3600:
         return _universe["list"]
     conn = await ensure()
-    syms = await conn.get_symbols()
+    syms = await _rpc(conn.get_symbols())
     lst = [s for s in syms if ".conv" not in s.lower() and not s.lower().startswith("conv")]
     _universe.update(t=time.time(), list=lst)
     return lst

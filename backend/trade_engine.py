@@ -56,6 +56,21 @@ def _atr(candles: list, period: int = 14) -> float:
     return float(tr.tail(period).mean())
 
 
+_TF_MIN = {"1m": 1, "5m": 5, "15m": 15, "30m": 30, "1h": 60, "4h": 240, "1d": 1440}
+
+
+def _tf_minutes(tf: str) -> int:
+    return _TF_MIN.get(tf, 60)
+
+
+def _humanize_mins(m: float) -> str:
+    m = int(round(m))
+    if m < 60:
+        return f"~{max(5, m)} min"
+    h, mm = m // 60, m % 60
+    return f"~{h}h" + (f" {mm}m" if mm else "")
+
+
 def _is_demo(info: dict) -> bool:
     t = str(info.get("type", "")).upper()
     # MetaApi reports demo accounts as ACCOUNT_TRADE_MODE_DEMO
@@ -69,15 +84,14 @@ async def daily_pnl() -> dict:
     realized = 0.0
     floating = 0.0
     try:
-        conn = await mt5_trader.ensure()
-        deals = await conn.get_deals_by_time_range(start, _now()) or []
+        deals = await mt5_trader.deals_range(start, _now()) or []
         if isinstance(deals, dict):
             deals = deals.get("deals", []) or []
         closing = {"DEAL_ENTRY_OUT", "DEAL_ENTRY_OUT_BY", "DEAL_ENTRY_INOUT"}
         for d in deals:
             if str(d.get("entryType", "")) in closing:
                 realized += float(d.get("profit", 0) or 0) + float(d.get("commission", 0) or 0) + float(d.get("swap", 0) or 0)
-        for p in (await conn.get_positions() or []):
+        for p in (await mt5_trader.positions() or []):
             floating += float(p.get("unrealizedProfit", p.get("profit", 0)) or 0)
     except Exception as e:  # noqa
         logger.warning(f"daily_pnl failed: {e}")
@@ -101,8 +115,7 @@ async def daily_pnl() -> dict:
 async def _active_bot_positions() -> int:
     """How many of the bot's own trades are currently open on the account."""
     try:
-        conn = await mt5_trader.ensure()
-        live_ids = {str(p.get("id")) for p in (await conn.get_positions() or [])}
+        live_ids = {str(p.get("id")) for p in (await mt5_trader.positions() or [])}
     except Exception:  # noqa
         live_ids = set()
     open_trades = await db.trades.find({"status": "open"}, {"_id": 0, "position_id": 1}).to_list(100)
@@ -145,16 +158,13 @@ async def _risk_gate(symbol: str, lot: float) -> str | None:
 
 
 # ----------------------------- active instrument universe -----------------------------
-_DEFAULT_TARGETS = [
-    {"signal": "XAUUSD", "timeframe": "1h", "label": "Gold"},
-    {"signal": "BTCUSD", "timeframe": "1h", "label": "Bitcoin"},
-]
-
-
 async def _scan_targets() -> list:
     """Every instrument the bot should hunt for setups on: the Gold/BTC defaults
-    plus the symbol of every strategy the user has turned on (enabled)."""
-    targets = [dict(t) for t in _DEFAULT_TARGETS]
+    plus the symbol of every strategy the user has turned on (enabled). All scanned
+    on the intraday day-trading timeframe (30min-5h holds)."""
+    tf = rc.TRADE_TIMEFRAME
+    targets = [{"signal": "XAUUSD", "timeframe": tf, "label": "Gold"},
+               {"signal": "BTCUSD", "timeframe": tf, "label": "Bitcoin"}]
     seen = {mt5_trader.mt5_symbol(t["signal"]) for t in targets}
     strats = await db.strategies.find({"enabled": True}, {"_id": 0}).to_list(500)
     for s in strats:
@@ -162,7 +172,7 @@ async def _scan_targets() -> list:
         if not m or m in seen:
             continue
         seen.add(m)
-        targets.append({"signal": s["symbol"], "timeframe": s.get("timeframe", "1h"),
+        targets.append({"signal": s["symbol"], "timeframe": tf,
                         "label": s.get("name") or m})
     return targets
 
@@ -208,8 +218,9 @@ def _predict(candles: list, side: str, entry: float, sl: float, tp: float,
     prices = np.full(n, entry, dtype=float)
     active = np.ones(n, dtype=bool)
     outcome = np.zeros(n, dtype=float)  # in price terms, + = profit
+    resolved_step = np.full(n, horizon, dtype=float)  # bars until TP/SL (horizon if never)
     rng = np.random.default_rng()
-    for _ in range(horizon):
+    for i in range(1, horizon + 1):
         shocks = rng.normal(mu, sigma, n)
         prices = np.where(active, prices * np.exp(shocks), prices)
         if side == "BUY":
@@ -218,9 +229,11 @@ def _predict(candles: list, side: str, entry: float, sl: float, tp: float,
         else:
             tp_hit = active & (prices <= tp)
             sl_hit = active & (prices >= sl)
+        hit = tp_hit | sl_hit
         outcome[tp_hit] = tp_dist
         outcome[sl_hit] = -sl_dist
-        active &= ~(tp_hit | sl_hit)
+        resolved_step[hit] = i
+        active &= ~hit
         if not active.any():
             break
     # settle anything still open at its mark-to-market
@@ -231,10 +244,12 @@ def _predict(candles: list, side: str, entry: float, sl: float, tp: float,
     win_prob = float(np.mean(outcome > 0))
     exp_value_price = float(np.mean(outcome))
     expected_r = exp_value_price / sl_dist
+    est_hold_bars = float(np.median(resolved_step))
     return {
         "win_prob": round(win_prob, 3),
         "expected_r": round(expected_r, 3),
         "horizon_bars": horizon,
+        "est_hold_bars": est_hold_bars,
         "paths": n,
     }
 
@@ -273,9 +288,10 @@ def _min_stop_dist(spec: dict) -> float:
 
 
 # ----------------------------- proposals -----------------------------
-async def propose(signal_symbol: str, timeframe: str = "1h") -> dict:
+async def propose(signal_symbol: str, timeframe: str = None) -> dict:
     """Build a pending trade proposal only when the outlook is confident AND a
     forward simulation shows a favourable, risk-sized setup."""
+    timeframe = timeframe or rc.TRADE_TIMEFRAME
     mt5_sym = mt5_trader.mt5_symbol(signal_symbol) or signal_symbol
     if mt5_sym not in await allowed_symbols():
         return {"ok": False, "error": f"{mt5_sym} isn't one of your active instruments. Turn on a strategy for it first."}
@@ -318,10 +334,14 @@ async def propose(signal_symbol: str, timeframe: str = "1h") -> dict:
 
     # forward prediction
     pred = _predict(candles, side, price, sl, tp, score)
+    tf_min = _tf_minutes(timeframe)
+    hold_min = pred["est_hold_bars"] * tf_min
+    hold_label = _humanize_mins(hold_min)
+    window_label = _humanize_mins(pred["horizon_bars"] * tf_min)
     if pred["win_prob"] < rc.MIN_WIN_PROB or pred["expected_r"] < rc.MIN_EXPECTED_R:
         return {"ok": False, "error": (
             f"Simulation says don't take it — only {int(pred['win_prob']*100)}% win odds "
-            f"and {pred['expected_r']:+.2f}R expected over the next {pred['horizon_bars']} bars. Waiting.")}
+            f"and {pred['expected_r']:+.2f}R expected within {window_label}. Waiting.")}
 
     # risk-based sizing (so a stop-out costs ~RISK_PER_TRADE_USD, not the whole budget)
     lot, est_risk, vpu = _risk_lot(spec, sl_dist, rc.RISK_PER_TRADE_USD)
@@ -329,8 +349,9 @@ async def propose(signal_symbol: str, timeframe: str = "1h") -> dict:
 
     reasons = ol.get("reasons", [])[:3]
     reasons.append(
-        f"Simulation: {int(pred['win_prob']*100)}% win odds, {pred['expected_r']:+.2f}R expected "
-        f"over ~{pred['horizon_bars']} bars. Sized to risk ≈ ${est_risk if est_risk is not None else rc.RISK_PER_TRADE_USD}.")
+        f"Simulation: {int(pred['win_prob']*100)}% win odds, {pred['expected_r']:+.2f}R expected; "
+        f"typically plays out in {hold_label} (day-trade, within {window_label}). "
+        f"Sized to risk ≈ ${est_risk if est_risk is not None else rc.RISK_PER_TRADE_USD}.")
 
     prop = {
         "id": str(uuid.uuid4()),
@@ -349,6 +370,8 @@ async def propose(signal_symbol: str, timeframe: str = "1h") -> dict:
         "win_prob": pred["win_prob"],
         "expected_r": pred["expected_r"],
         "horizon_bars": pred["horizon_bars"],
+        "est_hold_min": int(round(hold_min)),
+        "hold_label": hold_label,
         "est_risk_usd": est_risk,
         "reasons": reasons,
         "status": "pending",
@@ -515,8 +538,7 @@ async def account_summary() -> dict:
 
 async def open_positions() -> list:
     try:
-        conn = await mt5_trader.ensure()
-        rows = await conn.get_positions() or []
+        rows = await mt5_trader.positions() or []
     except Exception as e:  # noqa
         logger.warning(f"open_positions failed: {e}")
         return []
