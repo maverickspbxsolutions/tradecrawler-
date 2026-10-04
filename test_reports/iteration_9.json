@@ -1,0 +1,23 @@
+{
+  "summary": "Verified the 'Invalid stops in the request' bug fix in trade_engine.approve(). Full propose -> approve -> list positions -> close -> verify-gone flow passed cleanly against the live Deriv-Demo (MetaApi) account via the public backend URL. Approve returned status 'placed' with a non-null position_id and fresh stop_loss/take_profit; no 'Invalid stops' error was returned. Approve latency 1.2s (well under 40s), confirming the asyncio.wait_for timeouts on MT5 RPCs don't block. Demo account left clean (position auto-closed, TRADE_RETCODE_DONE).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_trade_approve.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "trade_engine._fresh_stops uses `price * 0.0008` as a last-resort min distance floor — for very low-priced synthetics (e.g. some Volatility indices with price<10) this can collapse under broker stopsLevel; the max() with min_stop*1.5 covers it but worth a comment.",
+    "approve() swallows symbol_spec/_fresh_stops exceptions silently (`except Exception`) and falls back to the stale proposal stops — this re-introduces the original bug surface if MT5 is briefly flaky. Consider logging the exception and failing fast with a user-visible 'Could not refresh stops' error instead of placing the order with stale SL/TP.",
+    "No unit coverage for _fresh_stops rounding/tick-snapping logic — a focused unit test with a synthetic spec dict would protect against regressions without needing a live MetaApi connection."
+  ],
+  "updated_files": ["/app/backend/tests/test_trade_approve.py"],
+  "success_rate": {"backend": "100%", "frontend": "not tested (backend only)"},
+  "test_credentials": "xambiep90 / Reddestroad1$ (from /app/memory/test_credentials.md) — works via POST /api/auth/login",
+  "seed_data_creation": "None. A real demo-order was placed and immediately closed as part of the test; demo account left clean.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Run with: REACT_APP_BACKEND_URL=<public-url> pytest backend/tests/test_trade_approve.py -s. The engine is selective (confidence >=58%, sim >=45% / >=0.05R), so the propose step may legitimately return 400 'too weak' — the test retries BTCUSD then Volatility 100 Index then any other active symbol (skipping XAUUSD which is closed on weekends). Observed successful run: BTCUSD BUY 0.13 lot, approve in 1.2s, position 8788118497, closed TRADE_RETCODE_DONE.",
+  "rca of the issue": "RCA: SL/TP were snapshotted at propose() time. During the user-approval window the live price drifted, so the stored stops violated broker stopsLevel at approval time -> MT5 returned 'Invalid stops in the request'. FIX (verified): approve() now calls _fresh_stops(spec) which (a) reads live_price for the symbol, (b) preserves the proposal's risk distance but re-anchors to the current mid, (c) enforces stopsLevel*point*1.5 as the floor, and (d) snaps to tickSize/digits. The order is placed with these refreshed sl/tp and the proposal doc is updated to persist the actually-used stops. Mitigation already in place; recommend adding an explicit log + user-facing error if symbol_spec() or live_price() raise, instead of silently falling back to stale stops (see critical_code_review_comments)."
+}

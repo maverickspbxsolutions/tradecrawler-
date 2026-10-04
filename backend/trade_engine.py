@@ -613,7 +613,11 @@ async def approve(proposal_id: str) -> dict:
         spec = await mt5_trader.symbol_spec(p["mt5_symbol"])
         sl, tp, entry = await _fresh_stops(p, spec)
     except Exception as e:  # noqa
-        sl, tp, entry = p["stop_loss"], p["take_profit"], p["entry_ref"]
+        logger.warning(f"approve: could not refresh stops for {p['mt5_symbol']}: {e}")
+        await db.trade_proposals.update_one(
+            {"id": proposal_id}, {"$set": {"status": "failed",
+             "error": f"Could not refresh stops: {e}", "decided_at": _now().isoformat()}})
+        return {"ok": False, "error": "Could not refresh live stops right now — please try again in a moment."}
 
     client_id = f"TC_{p['mt5_symbol'][:6]}_{proposal_id.replace('-', '')[:8]}"
     try:

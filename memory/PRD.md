@@ -202,6 +202,17 @@ Approve-each-trade engine on the connected Deriv MT5 DEMO account via MetaApi.
   on its own — not a code bug.
 - Gold min-lot still forces ~$34 risk; crypto/synthetics size finely.
 
+## Fix: "Invalid stops in the request" on approve (FIXED — 2026-10-04, testing_agent verified)
+- Root cause: SL/TP computed at proposal time went stale as price drifted during the approval window,
+  so the broker rejected the order.
+- Fix in `trade_engine.approve()`: new `_fresh_stops(p, spec)` re-anchors SL/TP to the LIVE price at
+  approval, keeps the proposal's risk distance, enforces broker min stop (`_min_stop_dist`*1.5 buffer),
+  snaps to tickSize/digits. Final stops stored on proposal + trade record. If refresh fails it now fails
+  fast with a clear error (no stale fallback).
+- Verified by testing_agent iteration_9.json: 100% backend, propose->approve->place->close clean on live
+  Deriv-Demo, no "Invalid stops", 1.2s latency. Settings adjustable-hold/auto-approve/trailing + scan-status
+  readout also shipped this session.
+
 ## Known Caveats
 - Deriv market data (Gold, Volatility Indices, forex, stock indices) is UNREACHABLE from the
   Emergent builder/preview egress (Cloudflare HTTP 520). Deriv instruments still appear in the picker
