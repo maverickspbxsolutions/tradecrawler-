@@ -56,6 +56,79 @@ async def get_all_symbols():
         return _symbols_cache["list"] or POPULAR_SYMBOLS
 
 
+# ---------------- Deriv MT5 via MetaApi (real Deriv prices for ALL items) ----------------
+import mt5_trader  # noqa: E402
+
+_mt5_universe_set: set = set()
+_mt5_options_cache = {"t": 0.0, "options": None}
+_CRYPTO_BASES = ("BTC", "ETH", "LTC", "XRP", "BCH", "EOS", "BNB", "ADA", "SOL",
+                 "DOGE", "DOT", "LINK", "AVAX", "MATIC", "XLM", "TRX", "UNI", "ALGO")
+_SYNTH_KW = ("volatility", "boom", "crash", "step index", "jump ", "range break",
+             "drift switch", "dex ", "multi step", "hybrid", "jump index")
+
+
+def _mt5_category(name: str) -> str:
+    n = name.lower()
+    if any(k in n for k in _SYNTH_KW):
+        return "Synthetic & Volatility"
+    if name[:3] in ("XAU", "XAG", "XPT", "XPD") or any(k in n for k in ("gold", "silver", "platinum", "palladium")):
+        return "Metals"
+    if any(name.startswith(b) for b in _CRYPTO_BASES):
+        return "Crypto"
+    if name.endswith(".US"):
+        return "Stocks"
+    if "index" in n or any(k in n for k in ("wall street", "us 500", "us tech", "nasdaq", "germany",
+                                            "japan", "uk 100", "australia", "france", "netherlands",
+                                            "hong kong", "us 30", "swiss", "spain", "europe 50")):
+        return "Stock Indices"
+    if any(k in n for k in ("oil", "wti", "brent", "natural gas")):
+        return "Energies"
+    if len(name) == 6 and name.isalpha() and name.isupper():
+        return "Forex"
+    if "/" in name:
+        return "Forex"
+    return "Other"
+
+
+async def build_mt5_options():
+    """Fetch the live Deriv MT5 symbol universe and categorize it. Cached 1h."""
+    if not mt5_trader.is_configured():
+        return None
+    now = time.time()
+    if _mt5_options_cache["options"] and now - _mt5_options_cache["t"] < 3600:
+        return _mt5_options_cache["options"]
+    try:
+        syms = await mt5_trader.get_universe()
+    except Exception as e:  # noqa
+        logger.warning(f"MT5 universe fetch failed: {e}")
+        return _mt5_options_cache["options"]
+    global _mt5_universe_set
+    _mt5_universe_set = set(syms)
+    opts = [{"symbol": s, "label": s, "market": _mt5_category(s), "source": "deriv-mt5"} for s in syms]
+    _mt5_options_cache.update({"t": now, "options": opts})
+    return opts
+
+
+async def warm_mt5_universe():
+    try:
+        await build_mt5_options()
+        logger.info(f"MT5 universe ready: {len(_mt5_universe_set)} symbols")
+    except Exception:  # noqa
+        pass
+
+
+def mt5_ready_symbol(symbol: str):
+    """Resolve our symbol to an MT5 symbol if MT5 is ready and has it."""
+    if not (mt5_trader.is_configured() and mt5_trader.status().get("ready")):
+        return None
+    if symbol in _mt5_universe_set:
+        return symbol
+    m = mt5_trader.mt5_symbol(symbol)
+    if m and m in _mt5_universe_set:
+        return m
+    return None
+
+
 # ---------------- Deriv (forex, commodities, crypto, indices, synthetics) ----------------
 DERIV_APP_ID = os.environ.get("DERIV_APP_ID", "1089")
 DERIV_API_TOKEN = os.environ.get("DERIV_API_TOKEN")
@@ -362,6 +435,23 @@ async def get_candles(symbol: str, timeframe: str, limit: int = 300, closed_only
     if timeframe not in TIMEFRAMES:
         raise ValueError(f"Unsupported timeframe: {timeframe}")
 
+    # Prefer REAL Deriv data via MT5/MetaApi — identical to what the user trades on.
+    msym = mt5_ready_symbol(symbol)
+    if msym:
+        mkey = f"mt5:{msym}:{timeframe}:{limit}:{closed_only}"
+        mnow = time.time()
+        mc = _cache.get(mkey)
+        if mc and mnow - mc[0] < _CACHE_TTL:
+            return mc[1]
+        try:
+            rows = await mt5_trader.candles(msym, timeframe, limit, closed_only)
+            if rows:
+                health.update({"last_ok": mnow, "source": "deriv-mt5", "error": None})
+                _cache[mkey] = (mnow, rows)
+                return rows
+        except Exception as e:  # noqa
+            logger.warning(f"MT5 candles failed {symbol}->{msym}: {e}")
+
     if _is_deriv_symbol(symbol):
         yf = _yahoo_for(symbol)
         if yf:
@@ -435,6 +525,24 @@ async def get_live(symbol: str, timeframe: str):
     cached = _live_cache.get(key)
     if cached and now - cached[0] < _LIVE_TTL:
         return cached[1]
+
+    # Prefer real Deriv MT5 live price + forming candle
+    msym = mt5_ready_symbol(symbol)
+    if msym:
+        try:
+            lp = await mt5_trader.live_price(msym)
+            rows = await mt5_trader.candles(msym, timeframe, 2, closed_only=False)
+            candle = rows[-1] if rows else None
+            price = lp.get("price") or (candle["c"] if candle else None)
+            if candle and price is not None:
+                candle = {**candle, "c": price,
+                          "h": max(candle["h"], price), "l": min(candle["l"], price)}
+            out = {"symbol": symbol, "timeframe": timeframe, "price": price,
+                   "candle": candle, "source": "deriv-mt5", "server_ts": int(now * 1000)}
+            _live_cache[key] = (now, out)
+            return out
+        except Exception as e:  # noqa
+            logger.warning(f"MT5 live failed {symbol}->{msym}: {e}")
 
     candle = None
     source = None

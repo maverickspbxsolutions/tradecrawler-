@@ -54,9 +54,12 @@ export function Candlestick({ candles, height = 240, liveLast = false }) {
   const onMove = (e) => {
     const rect = ref.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
     const i = Math.floor(x / step);
-    if (i >= 0 && i < n) setHover({ i, c: candles[i] });
+    if (i >= 0 && i < n) setHover({ i, c: candles[i], x, y });
   };
+
+  const hoverPrice = hover ? min + (1 - (hover.y - padT) / plotH) * (max - min) : null;
 
   return (
     <div
@@ -120,12 +123,29 @@ export function Candlestick({ candles, height = 240, liveLast = false }) {
           stroke={lastUp ? GREEN : RED}
           strokeWidth={1}
           strokeDasharray="3 3"
-          opacity={0.6}
+          opacity={0.7}
         />
+        <rect x={plotW} y={yFor(last.c) - 8} width={padR} height={16} fill={lastUp ? GREEN : RED} rx={2} />
+        <text x={plotW + padR / 2} y={yFor(last.c) + 3} fill="#FFFFFF" fontSize="10"
+              fontFamily="Azeret Mono" textAnchor="middle" fontWeight="600">
+          {fmt(last.c)}
+        </text>
+
+        {hover && (
+          <g pointerEvents="none">
+            <line x1={hover.x} y1={padT} x2={hover.x} y2={H - padB} stroke={theme.axis} strokeWidth={0.6} strokeDasharray="2 3" opacity={0.6} />
+            <line x1={0} y1={hover.y} x2={plotW} y2={hover.y} stroke={theme.axis} strokeWidth={0.6} strokeDasharray="2 3" opacity={0.6} />
+            <rect x={plotW} y={hover.y - 8} width={padR} height={16} fill={theme.axis} rx={2} />
+            <text x={plotW + padR / 2} y={hover.y + 3} fill="#FFFFFF" fontSize="10" fontFamily="Azeret Mono" textAnchor="middle">
+              {fmt(hoverPrice)}
+            </text>
+          </g>
+        )}
       </svg>
 
       {hover && (
         <div className="absolute top-1 left-1 bg-popover border border-border rounded-sm px-2 py-1 text-[10px] font-mono num pointer-events-none">
+          <span className="text-muted-foreground">{new Date(hover.c.t).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>{"  "}
           <span className="text-muted-foreground">O</span> {fmt(hover.c.o)}{" "}
           <span className="text-muted-foreground">H</span> <span className="text-buy">{fmt(hover.c.h)}</span>{" "}
           <span className="text-muted-foreground">L</span> <span className="text-sell">{fmt(hover.c.l)}</span>{" "}

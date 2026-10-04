@@ -31,7 +31,7 @@ export function PriceChart({ symbol, tf, onTfChange }) {
   const live = useQuery({
     queryKey: ["live", symbol, tf],
     queryFn: async () => (await api.get(`/market/live?symbol=${symbol}&timeframe=${tf}`)).data,
-    refetchInterval: 5000,
+    refetchInterval: 3000,
     enabled: !!symbol,
     retry: 1,
   });

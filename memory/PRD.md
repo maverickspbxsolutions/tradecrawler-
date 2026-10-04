@@ -115,6 +115,27 @@ out-of-sample validation and market-regime detection.
   "Tuned to current market" note. Dashboard stays at $20. Framing remains "rough preview, not advice".
 - Verified via curl (stats + tuning present) and screenshot (renders in dark/light).
 
+## Iteration — Deriv MT5 live data + MetaApi trading bridge (2026-06)
+- Connected a **Deriv MT5 demo** account (login 32430043, server Deriv-Demo, $10k demo) via **MetaApi**
+  (metaapi.cloud) — the cloud bridge needed because MT5's native lib is Windows-only. MetaApi is reachable
+  from our egress (unlike Deriv's blocked WS). Secrets in backend/.env: METAAPI_TOKEN, MT5_LOGIN,
+  MT5_PASSWORD, MT5_SERVER, MT5_ACCOUNT_ID, METAAPI_REGION. SDK: metaapi-cloud-sdk.
+- `backend/mt5_trader.py`: long-lived RPC connection (warmed at startup), `candles()` / `live_price()` /
+  `get_universe()` (727 real Deriv symbols) + trade primitives `market_order()` / `close_position()` /
+  `positions()` / `account_info()`. `mt5_symbol()` maps our codes (frx*, cry*, *USDT, R_*, BOOM*, OTC_*)
+  to MT5 names.
+- market_data.py now uses **Deriv MT5 as the PRIMARY data source** for all resolvable symbols
+  (get_candles & get_live route to MT5 first, source "deriv-mt5"), falling back to Binance/Yahoo.
+  This unblocks synthetic/volatility indices (Volatility 75/100, Boom/Crash) which only exist on Deriv.
+  `/api/market/symbols` now serves the live 727-symbol MT5 universe grouped (Metals, Crypto, Synthetic &
+  Volatility, Stock Indices, Forex, Stocks, Energies), default BTCUSD.
+- Chart matched to MT5: real Deriv OHLC, green-up/red-down, right-axis price labels, MT5-style colored
+  current-price tag, crosshair with OHLC+time readout, 3s live updates.
+- Verified: XAUUSD/Volatility 75/BTCUSD candles+live+outlook via MT5; Gold & "100 Index" backtests run
+  on real MT5 data; chart screenshot confirms MT5 look.
+- PENDING (NOT built yet): the approve-each-trade flow + risk engine (max stake 2, $10 daily kill-switch,
+  Gold+BTC only) + trading UI. Connection & trade primitives are ready; app still places NO real orders.
+
 ## Known Caveats
 - Deriv market data (Gold, Volatility Indices, forex, stock indices) is UNREACHABLE from the
   Emergent builder/preview egress (Cloudflare HTTP 520). Deriv instruments still appear in the picker
