@@ -121,8 +121,8 @@ async def _risk_gate(symbol: str, lot: float) -> str | None:
     """Returns an error string if the trade must be blocked, else None."""
     if rc.TRADE_ENV != "demo":
         return "Trading is locked to demo mode."
-    if symbol not in rc.ALLOWED_SYMBOLS:
-        return f"{symbol} is not on the allowed list ({', '.join(rc.ALLOWED_SYMBOLS)})."
+    if symbol not in await allowed_symbols():
+        return f"{symbol} isn't one of your active instruments. Turn on a strategy for it first."
     if lot > rc.MAX_LOT:
         return f"Lot {lot} exceeds the max lot ceiling of {rc.MAX_LOT}."
     if lot < rc.MIN_LOT:
@@ -142,6 +142,48 @@ async def _risk_gate(symbol: str, lot: float) -> str | None:
     if pnl["kill_switch_active"]:
         return f"Daily loss kill switch active (lost ${pnl['loss_used']} of ${pnl['limit']} limit). No new trades today."
     return None
+
+
+# ----------------------------- active instrument universe -----------------------------
+_DEFAULT_TARGETS = [
+    {"signal": "XAUUSD", "timeframe": "1h", "label": "Gold"},
+    {"signal": "BTCUSD", "timeframe": "1h", "label": "Bitcoin"},
+]
+
+
+async def _scan_targets() -> list:
+    """Every instrument the bot should hunt for setups on: the Gold/BTC defaults
+    plus the symbol of every strategy the user has turned on (enabled)."""
+    targets = [dict(t) for t in _DEFAULT_TARGETS]
+    seen = {mt5_trader.mt5_symbol(t["signal"]) for t in targets}
+    strats = await db.strategies.find({"enabled": True}, {"_id": 0}).to_list(500)
+    for s in strats:
+        m = mt5_trader.mt5_symbol(s.get("symbol"))
+        if not m or m in seen:
+            continue
+        seen.add(m)
+        targets.append({"signal": s["symbol"], "timeframe": s.get("timeframe", "1h"),
+                        "label": s.get("name") or m})
+    return targets
+
+
+async def allowed_symbols() -> set:
+    """MT5 symbols the engine is currently allowed to trade (demo phase)."""
+    syms = {mt5_trader.mt5_symbol(s) or s for s in rc.ALLOWED_SYMBOLS}
+    for t in await _scan_targets():
+        m = mt5_trader.mt5_symbol(t["signal"])
+        if m:
+            syms.add(m)
+    return syms
+
+
+async def active_instruments() -> list:
+    """For the UI: the scan buttons the user can trigger manually."""
+    out = []
+    for t in await _scan_targets():
+        out.append({"value": t["signal"], "label": t["label"],
+                    "mt5_symbol": mt5_trader.mt5_symbol(t["signal"])})
+    return out
 
 
 def _predict(candles: list, side: str, entry: float, sl: float, tp: float,
@@ -235,8 +277,8 @@ async def propose(signal_symbol: str, timeframe: str = "1h") -> dict:
     """Build a pending trade proposal only when the outlook is confident AND a
     forward simulation shows a favourable, risk-sized setup."""
     mt5_sym = mt5_trader.mt5_symbol(signal_symbol) or signal_symbol
-    if mt5_sym not in rc.ALLOWED_SYMBOLS:
-        return {"ok": False, "error": f"Only {', '.join(rc.ALLOWED_SYMBOLS)} can be traded right now."}
+    if mt5_sym not in await allowed_symbols():
+        return {"ok": False, "error": f"{mt5_sym} isn't one of your active instruments. Turn on a strategy for it first."}
 
     candles = await md.get_candles(signal_symbol, timeframe, 300)
     if not candles or len(candles) < 60:
@@ -318,6 +360,44 @@ async def propose(signal_symbol: str, timeframe: str = "1h") -> dict:
     }
     await db.trade_proposals.insert_one({**prop})
     return {"ok": True, "proposal": prop}
+
+
+async def auto_scan() -> dict:
+    """Background hunt: scan every active instrument and auto-create a proposal
+    when a high-conviction setup appears. Deduped so there's at most one pending
+    proposal (and no duplicate of an already-open trade) per symbol."""
+    if not mt5_trader.is_configured():
+        return {"created": 0, "reason": "mt5 not configured"}
+    try:
+        info = await mt5_trader.account_info()
+    except Exception:  # noqa
+        return {"created": 0, "reason": "account unreachable"}
+    if not _is_demo(info):  # safety: never auto-hunt on a live account
+        return {"created": 0, "reason": "not demo"}
+
+    now = _now()
+    pend = await db.trade_proposals.find(
+        {"status": "pending"}, {"_id": 0, "mt5_symbol": 1, "expires_at": 1}).to_list(200)
+    busy = {p["mt5_symbol"] for p in pend if datetime.fromisoformat(p["expires_at"]) > now}
+    for t in await db.trades.find({"status": "open"}, {"_id": 0, "symbol": 1}).to_list(100):
+        busy.add(t["symbol"])
+
+    created = 0
+    seen = set()
+    for tgt in (await _scan_targets())[:10]:
+        m = mt5_trader.mt5_symbol(tgt["signal"])
+        if not m or m in seen or m in busy:
+            continue
+        seen.add(m)
+        try:
+            res = await propose(tgt["signal"], tgt.get("timeframe", "1h"))
+        except Exception as e:  # noqa
+            logger.warning(f"auto_scan propose {tgt['signal']} failed: {e}")
+            continue
+        if res.get("ok"):
+            created += 1
+            logger.info(f"auto_scan: queued {res['proposal']['side']} {m}")
+    return {"created": created}
 
 
 async def list_proposals(limit: int = 50) -> list:

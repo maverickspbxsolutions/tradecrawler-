@@ -41,6 +41,11 @@ async def trades_account():
     return await trade_engine.account_summary()
 
 
+@api.get("/trades/active-symbols")
+async def trades_active_symbols():
+    return await trade_engine.active_instruments()
+
+
 @api.get("/trades/pnl")
 async def trades_pnl():
     return await trade_engine.daily_pnl()

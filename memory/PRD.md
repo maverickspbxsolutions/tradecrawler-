@@ -159,6 +159,21 @@ Approve-each-trade engine on the connected Deriv MT5 DEMO account via MetaApi.
 - requirements.txt updated (pip freeze) so metaapi_cloud_sdk + pandas/numpy persist for deploy.
 - NOT user-confirmed in production yet. Live trading stays OFF until explicit go-live.
 
+## Dynamic universe + auto-hunt (BUILT — 2026-10-04, agent-tested)
+- Tradeable universe is now DYNAMIC: Gold/BTC defaults PLUS the symbol of every ENABLED strategy
+  (`trade_engine._scan_targets` / `allowed_symbols` / `active_instruments`). Turn on a strategy and its
+  instrument becomes tradeable automatically (e.g. "Volatility 100 Index").
+- `mt5_trader.mt5_symbol` now passes through already-valid MT5 symbol names (strategies may store
+  "Volatility 100 Index" directly, not "R_100"). Uses `_MT5_SYMBOLS = set(SYMBOL_MAP.values())`.
+- Background auto-scanner: `scheduler._scan_loop` every 90s calls `trade_engine.auto_scan()`, which scans
+  each active instrument and auto-creates a PROPOSAL when the confidence+simulation gates pass. Deduped:
+  at most one pending proposal per symbol, skips symbols with an open bot trade. DEMO-ONLY (refuses if
+  account isn't demo). It only PROPOSES — never auto-approves (approve stays a manual user action).
+- Frontend: scan buttons are rendered from GET /api/trades/active-symbols (dynamic). Verified live: queue
+  auto-filled SELL XAUUSD + BUY BTCUSD; Volatility 100 scanned and correctly declined at 31% confidence.
+- Gold min-lot note: XAUUSD contractSize=100, minVolume=0.01 -> smallest gold trade risks ~$34 (can't go
+  lower). Crypto/synthetics (contractSize 1) size finely to the ~$12.50 target.
+
 ## Known Caveats
 - Deriv market data (Gold, Volatility Indices, forex, stock indices) is UNREACHABLE from the
   Emergent builder/preview egress (Cloudflare HTTP 520). Deriv instruments still appear in the picker

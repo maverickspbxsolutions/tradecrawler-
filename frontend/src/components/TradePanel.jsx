@@ -11,11 +11,6 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
-const SYMBOLS = [
-  { key: "XAUUSD", label: "Gold" },
-  { key: "BTCUSD", label: "Bitcoin" },
-];
-
 function Stat({ label, value, cls }) {
   return (
     <div className="border border-border/40 bg-background px-3 py-2 rounded-sm">
@@ -34,6 +29,11 @@ export function TradePanel() {
     queryKey: ["trade-account"],
     queryFn: async () => (await api.get("/trades/account")).data,
     refetchInterval: 15000,
+  });
+  const { data: symbols = [] } = useQuery({
+    queryKey: ["trade-active-symbols"],
+    queryFn: async () => (await api.get("/trades/active-symbols")).data,
+    refetchInterval: 30000,
   });
   const { data: pnl } = useQuery({
     queryKey: ["trade-pnl"],
@@ -167,20 +167,20 @@ export function TradePanel() {
         {/* propose */}
         <div>
           <div className="text-[10px] font-mono uppercase tracking-[0.1em] text-muted-foreground mb-1.5">
-            Generate a trade idea (Gold / Bitcoin only)
+            Auto-hunting your active instruments · tap to scan now
           </div>
-          <div className="flex gap-2">
-            {SYMBOLS.map((s) => (
+          <div className="flex gap-2 flex-wrap" data-testid="scan-buttons">
+            {symbols.map((s) => (
               <Button
-                key={s.key}
+                key={s.value}
                 size="sm"
                 variant="outline"
                 disabled={!!busy || blocked}
-                onClick={() => propose(s.key)}
-                data-testid={`propose-${s.key}`}
+                onClick={() => propose(s.value)}
+                data-testid={`propose-${s.value}`}
                 className="font-mono text-xs"
               >
-                {busy === `propose-${s.key}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : `Scan ${s.label}`}
+                {busy === `propose-${s.value}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : `Scan ${s.label}`}
               </Button>
             ))}
           </div>

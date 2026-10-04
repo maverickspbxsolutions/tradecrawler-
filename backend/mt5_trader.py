@@ -32,6 +32,9 @@ _state = {"conn": None, "account": None, "ready": False, "connecting": False, "e
 _lock: asyncio.Lock | None = None
 _universe = {"t": 0.0, "list": None}
 
+# valid MT5 symbol names (the mapped targets) for pass-through matching
+_MT5_SYMBOLS = set(SYMBOL_MAP.values())
+
 
 def is_configured() -> bool:
     return bool(os.environ.get("METAAPI_TOKEN") and os.environ.get("MT5_ACCOUNT_ID"))
@@ -44,6 +47,9 @@ def mt5_symbol(sym: str):
         return SYMBOL_MAP[sym]
     if sym.upper() in SYMBOL_MAP:
         return SYMBOL_MAP[sym.upper()]
+    # already a valid MT5 symbol (e.g. "Volatility 100 Index", "XAUUSD")
+    if sym in _MT5_SYMBOLS:
+        return sym
     if sym.startswith("frx") and len(sym) == 9:
         return sym[3:]
     if sym.startswith("cry") and len(sym) >= 6:
