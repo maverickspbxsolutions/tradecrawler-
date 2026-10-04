@@ -62,6 +62,7 @@ async def _scan_loop():
     logger.info("Trade auto-scan loop started")
     while True:
         try:
+            await trade_engine.trail_stops()
             await trade_engine.auto_scan()
         except Exception as e:  # noqa
             logger.warning(f"Trade scan loop error: {e}")

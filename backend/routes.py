@@ -46,6 +46,11 @@ async def trades_active_symbols():
     return await trade_engine.active_instruments()
 
 
+@api.get("/trades/scan-status")
+async def trades_scan_status():
+    return await trade_engine.scan_status()
+
+
 @api.get("/trades/pnl")
 async def trades_pnl():
     return await trade_engine.daily_pnl()
@@ -545,6 +550,11 @@ class SettingsInput(BaseModel):
     max_alerts_per_hour: Optional[int] = None
     max_emails_per_day: Optional[int] = None
     min_minutes_between_same_strategy: Optional[int] = None
+    trade_timeframe: Optional[str] = None
+    max_hold_hours: Optional[float] = None
+    auto_approve: Optional[bool] = None
+    auto_approve_min_winprob: Optional[float] = None
+    trailing_enabled: Optional[bool] = None
 
 
 @api.get("/settings")

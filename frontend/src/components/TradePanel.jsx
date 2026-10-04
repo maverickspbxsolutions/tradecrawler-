@@ -34,6 +34,11 @@ export function TradePanel() {
     queryFn: async () => (await api.get("/trades/active-symbols")).data,
     refetchInterval: 30000,
   });
+  const { data: scanStatus = [] } = useQuery({
+    queryKey: ["trade-scan-status"],
+    queryFn: async () => (await api.get("/trades/scan-status")).data,
+    refetchInterval: 20000,
+  });
   const { data: pnl } = useQuery({
     queryKey: ["trade-pnl"],
     queryFn: async () => (await api.get("/trades/pnl")).data,
@@ -56,7 +61,7 @@ export function TradePanel() {
   });
 
   const refresh = () =>
-    ["trade-account", "trade-pnl", "trade-proposals", "trade-positions", "trade-log"].forEach((k) =>
+    ["trade-account", "trade-pnl", "trade-proposals", "trade-positions", "trade-log", "trade-scan-status"].forEach((k) =>
       qc.invalidateQueries({ queryKey: [k] })
     );
 
@@ -183,6 +188,27 @@ export function TradePanel() {
               </Button>
             ))}
           </div>
+
+          {scanStatus.length > 0 && (
+            <div className="mt-2 border border-border/40 bg-background rounded-sm divide-y divide-border/30" data-testid="scan-status">
+              {scanStatus.map((s) => (
+                <div key={s.value} className="flex items-center justify-between gap-2 px-2.5 py-1.5 text-[11px]" data-testid={`scan-status-${s.mt5_symbol}`}>
+                  <span className="font-mono flex items-center gap-1.5 shrink-0">
+                    <span className={`h-1.5 w-1.5 rounded-full ${s.tradeable ? "bg-buy" : "bg-muted-foreground/50"}`} />
+                    {s.label}
+                    {s.tradeable && s.side && (
+                      <span className={s.side === "BUY" ? "text-buy" : "text-sell"}>{s.side}</span>
+                    )}
+                  </span>
+                  <span className="text-muted-foreground text-right truncate num">
+                    {s.tradeable
+                      ? `${Math.round((s.win_prob || 0) * 100)}% odds · ${s.hold_label || ""}`
+                      : s.reason}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* approval queue */}

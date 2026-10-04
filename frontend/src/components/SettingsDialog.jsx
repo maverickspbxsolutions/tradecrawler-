@@ -165,6 +165,50 @@ export function SettingsDialog({ open, onOpenChange }) {
               </div>
             </div>
           </div>
+          <div>
+            <Label className="text-[10px] font-mono uppercase text-muted-foreground">Day-trading engine</Label>
+            <div className="grid grid-cols-2 gap-2 mt-1">
+              <div>
+                <span className="text-[9px] font-mono uppercase text-muted-foreground">Chart timeframe</span>
+                <select
+                  value={form.trade_timeframe || "15m"}
+                  onChange={(e) => { set("trade_timeframe", e.target.value); save.mutate({ trade_timeframe: e.target.value }); }}
+                  className="w-full h-8 rounded-sm bg-background border border-input text-xs mt-0.5 px-2 num"
+                  data-testid="trade-timeframe-select"
+                >
+                  <option value="5m">5 min</option>
+                  <option value="15m">15 min</option>
+                  <option value="30m">30 min</option>
+                </select>
+              </div>
+              <div>
+                <span className="text-[9px] font-mono uppercase text-muted-foreground">Max hold (hours)</span>
+                <Input type="number" step="0.5" min="0.5" max="12" value={form.max_hold_hours ?? 5}
+                  onChange={(e) => set("max_hold_hours", parseFloat(e.target.value))}
+                  onBlur={() => save.mutate({ max_hold_hours: form.max_hold_hours })}
+                  className="h-8 rounded-sm num text-xs mt-0.5" data-testid="max-hold-input" />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between border border-border/40 bg-background rounded-sm px-3 py-2 mt-2">
+              <span className="text-xs">Trailing stops <span className="text-muted-foreground">· lock in profit on winners</span></span>
+              <Switch checked={form.trailing_enabled !== false} onCheckedChange={(v) => { set("trailing_enabled", v); save.mutate({ trailing_enabled: v }); }} data-testid="trailing-switch" />
+            </div>
+
+            <div className="flex items-center justify-between border border-border/40 bg-background rounded-sm px-3 py-2 mt-2">
+              <span className="text-xs">Auto-approve strongest trades <span className="text-muted-foreground">· demo</span></span>
+              <Switch checked={!!form.auto_approve} onCheckedChange={(v) => { set("auto_approve", v); save.mutate({ auto_approve: v }); }} data-testid="auto-approve-switch" />
+            </div>
+            {form.auto_approve && (
+              <div className="mt-2">
+                <span className="text-[9px] font-mono uppercase text-muted-foreground">Auto-approve only above win odds (%)</span>
+                <Input type="number" min="50" max="99" value={Math.round((form.auto_approve_min_winprob ?? 0.85) * 100)}
+                  onChange={(e) => set("auto_approve_min_winprob", Math.max(0.5, Math.min(0.99, (parseInt(e.target.value) || 85) / 100)))}
+                  onBlur={() => save.mutate({ auto_approve_min_winprob: form.auto_approve_min_winprob })}
+                  className="h-8 rounded-sm num text-xs mt-0.5" data-testid="auto-approve-threshold-input" />
+              </div>
+            )}
+          </div>
         </div>
 
         <DialogFooter>

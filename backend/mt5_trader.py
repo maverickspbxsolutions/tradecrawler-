@@ -166,6 +166,11 @@ async def close_position(position_id: str):
     return await _rpc(conn.close_position(position_id), timeout=30)
 
 
+async def modify_position(position_id: str, stop_loss=None, take_profit=None):
+    conn = await ensure()
+    return await _rpc(conn.modify_position(position_id, stop_loss=stop_loss, take_profit=take_profit), timeout=30)
+
+
 # ---------------- market data (real Deriv prices via MT5) ----------------
 def _to_ms(t) -> int:
     if isinstance(t, (int, float)):

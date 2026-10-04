@@ -23,6 +23,7 @@ import mt5_trader
 import risk_config as rc
 from outlook import compute_outlook
 import market_data as md
+from alerts import get_settings
 
 logger = logging.getLogger("trade_engine")
 
@@ -197,7 +198,7 @@ async def active_instruments() -> list:
 
 
 def _predict(candles: list, side: str, entry: float, sl: float, tp: float,
-             score: int) -> dict:
+             score: int, horizon: int = None) -> dict:
     """Forward Monte-Carlo: simulate many price paths (drift tilted by the live
     outlook) and measure how often the trade reaches TP before SL. Returns win
     probability and expected value in R (risk) multiples."""
@@ -211,7 +212,7 @@ def _predict(candles: list, side: str, entry: float, sl: float, tp: float,
     mu = mu_hist * 0.3 + tilt
 
     n = rc.SIM_PATHS
-    horizon = rc.SIM_HORIZON_BARS
+    horizon = horizon or rc.SIM_HORIZON_BARS
     sl_dist = abs(entry - sl) or entry * 0.002
     tp_dist = abs(tp - entry) or entry * 0.003
 
@@ -288,30 +289,108 @@ def _min_stop_dist(spec: dict) -> float:
 
 
 # ----------------------------- proposals -----------------------------
-async def propose(signal_symbol: str, timeframe: str = None) -> dict:
-    """Build a pending trade proposal only when the outlook is confident AND a
-    forward simulation shows a favourable, risk-sized setup."""
-    timeframe = timeframe or rc.TRADE_TIMEFRAME
-    mt5_sym = mt5_trader.mt5_symbol(signal_symbol) or signal_symbol
-    if mt5_sym not in await allowed_symbols():
-        return {"ok": False, "error": f"{mt5_sym} isn't one of your active instruments. Turn on a strategy for it first."}
+async def _trade_settings() -> dict:
+    """Effective trade config: user Settings overrides over risk_config defaults."""
+    s = await get_settings()
+    tf = s.get("trade_timeframe") or rc.TRADE_TIMEFRAME
+    if tf not in _TF_MIN:
+        tf = rc.TRADE_TIMEFRAME
+    max_hold_h = float(s.get("max_hold_hours") or (rc.SIM_HORIZON_BARS * _tf_minutes(rc.TRADE_TIMEFRAME) / 60))
+    horizon = max(2, int(round(max_hold_h * 60 / _tf_minutes(tf))))
+    return {
+        "timeframe": tf,
+        "max_hold_hours": max_hold_h,
+        "horizon": horizon,
+        "auto_approve": bool(s.get("auto_approve")),
+        "auto_approve_min_winprob": float(s.get("auto_approve_min_winprob") or 0.85),
+        "trailing_enabled": s.get("trailing_enabled", True) is not False,
+    }
 
+
+async def _analyze(signal_symbol: str, timeframe: str, horizon: int) -> dict:
+    """Read-only market read + forward simulation for one instrument. Returns the
+    full decision (tradeable or not, with reasons) WITHOUT placing or persisting."""
+    mt5_sym = mt5_trader.mt5_symbol(signal_symbol) or signal_symbol
     candles = await md.get_candles(signal_symbol, timeframe, 300)
     if not candles or len(candles) < 60:
-        return {"ok": False, "error": "Not enough market data yet to judge this instrument."}
+        return {"ok": False, "mt5_symbol": mt5_sym, "reason": "Not enough market data yet."}
     ol = compute_outlook(candles, signal_symbol, timeframe)
     direction = ol.get("direction")
-    if direction not in ("Up", "Down"):
-        return {"ok": False, "error": "No clear buy/sell signal — the outlook is Neutral. Waiting for a better setup."}
-
     conf = float(ol.get("confidence", 50))
     score = int(ol.get("score", 0))
+    if direction not in ("Up", "Down"):
+        return {"ok": False, "mt5_symbol": mt5_sym, "direction": "Neutral", "confidence": int(conf),
+                "reason": "Outlook is Neutral — no clear buy/sell edge."}
     if conf < rc.MIN_CONFIDENCE:
-        return {"ok": False, "error": f"Signal too weak to risk money ({int(conf)}% confidence, need {rc.MIN_CONFIDENCE}%+). Holding off."}
+        return {"ok": False, "mt5_symbol": mt5_sym, "direction": direction, "confidence": int(conf),
+                "reason": f"Confidence {int(conf)}% (need {rc.MIN_CONFIDENCE}%+). Holding off."}
 
     side = "BUY" if direction == "Up" else "SELL"
     live = await md.get_live(signal_symbol, timeframe)
     price = float(live.get("price") or candles[-1]["c"])
+    atr = _atr(candles) or price * 0.004
+    d = _digits(price)
+    sl_dist = round(1.5 * atr, d)
+    tp_dist = round(1.5 * sl_dist, d)
+    if side == "BUY":
+        sl, tp = round(price - sl_dist, d), round(price + tp_dist, d)
+    else:
+        sl, tp = round(price + sl_dist, d), round(price - tp_dist, d)
+
+    pred = _predict(candles, side, price, sl, tp, score, horizon)
+    tf_min = _tf_minutes(timeframe)
+    hold_min = pred["est_hold_bars"] * tf_min
+    hold_label = _humanize_mins(hold_min)
+    window_label = _humanize_mins(pred["horizon_bars"] * tf_min)
+    base = {"mt5_symbol": mt5_sym, "signal_symbol": signal_symbol, "timeframe": timeframe,
+            "direction": direction, "side": side, "confidence": int(conf),
+            "win_prob": pred["win_prob"], "expected_r": pred["expected_r"],
+            "horizon_bars": pred["horizon_bars"], "est_hold_min": int(round(hold_min)),
+            "hold_label": hold_label, "window_label": window_label,
+            "price": round(price, d), "stop_loss": sl, "take_profit": tp, "sl_dist": sl_dist,
+            "vol": float((ol.get("metrics") or {}).get("volatility_pct") or 0),
+            "reasons": ol.get("reasons", [])[:3]}
+    if pred["win_prob"] < rc.MIN_WIN_PROB or pred["expected_r"] < rc.MIN_EXPECTED_R:
+        base["ok"] = False
+        base["reason"] = (f"Sim {int(pred['win_prob']*100)}% win odds, {pred['expected_r']:+.2f}R "
+                          f"within {window_label} — not worth it. Waiting.")
+        return base
+    base["ok"] = True
+    base["reason"] = f"Tradeable: {int(pred['win_prob']*100)}% win odds, {pred['expected_r']:+.2f}R, hold {hold_label}."
+    return base
+
+
+async def scan_status() -> list:
+    """Why-no-trade readout: current confidence + sim odds + decision per instrument."""
+    cfg = await _trade_settings()
+    out = []
+    for t in (await _scan_targets())[:10]:
+        try:
+            a = await _analyze(t["signal"], cfg["timeframe"], cfg["horizon"])
+        except Exception as e:  # noqa
+            a = {"ok": False, "mt5_symbol": mt5_trader.mt5_symbol(t["signal"]), "reason": f"Unavailable: {e}"}
+        out.append({
+            "label": t["label"], "value": t["signal"], "mt5_symbol": a.get("mt5_symbol"),
+            "tradeable": a.get("ok", False), "side": a.get("side"),
+            "direction": a.get("direction"), "confidence": a.get("confidence"),
+            "win_prob": a.get("win_prob"), "expected_r": a.get("expected_r"),
+            "hold_label": a.get("hold_label"), "reason": a.get("reason"),
+        })
+    return out
+
+
+async def propose(signal_symbol: str, timeframe: str = None) -> dict:
+    """Build a pending trade proposal only when the outlook is confident AND a
+    forward simulation shows a favourable, risk-sized setup."""
+    cfg = await _trade_settings()
+    timeframe = timeframe or cfg["timeframe"]
+    mt5_sym = mt5_trader.mt5_symbol(signal_symbol) or signal_symbol
+    if mt5_sym not in await allowed_symbols():
+        return {"ok": False, "error": f"{mt5_sym} isn't one of your active instruments. Turn on a strategy for it first."}
+
+    a = await _analyze(signal_symbol, timeframe, cfg["horizon"])
+    if not a.get("ok"):
+        return {"ok": False, "error": a.get("reason", "No tradeable setup right now.")}
 
     # symbol trading rules (volume steps, min stop distance, contract size)
     try:
@@ -319,38 +398,20 @@ async def propose(signal_symbol: str, timeframe: str = None) -> dict:
     except Exception as e:  # noqa
         return {"ok": False, "error": f"Could not read {mt5_sym} trading rules: {e}"}
 
-    atr = _atr(candles) or price * 0.004
-    d = _digits(price)
-    sl_dist = 1.5 * atr
-    sl_dist = max(sl_dist, _min_stop_dist(spec) * 1.2)  # respect broker min stop
+    side, price, d = a["side"], a["price"], _digits(a["price"])
+    sl_dist = max(a["sl_dist"], _min_stop_dist(spec) * 1.2)  # respect broker min stop
     sl_dist = round(sl_dist, d)
-    tp_dist = round(1.5 * sl_dist, d)  # 1.5 reward:risk
+    tp_dist = round(1.5 * sl_dist, d)
     if side == "BUY":
-        sl = round(price - sl_dist, d)
-        tp = round(price + tp_dist, d)
+        sl, tp = round(price - sl_dist, d), round(price + tp_dist, d)
     else:
-        sl = round(price + sl_dist, d)
-        tp = round(price - tp_dist, d)
+        sl, tp = round(price + sl_dist, d), round(price - tp_dist, d)
 
-    # forward prediction
-    pred = _predict(candles, side, price, sl, tp, score)
-    tf_min = _tf_minutes(timeframe)
-    hold_min = pred["est_hold_bars"] * tf_min
-    hold_label = _humanize_mins(hold_min)
-    window_label = _humanize_mins(pred["horizon_bars"] * tf_min)
-    if pred["win_prob"] < rc.MIN_WIN_PROB or pred["expected_r"] < rc.MIN_EXPECTED_R:
-        return {"ok": False, "error": (
-            f"Simulation says don't take it — only {int(pred['win_prob']*100)}% win odds "
-            f"and {pred['expected_r']:+.2f}R expected within {window_label}. Waiting.")}
-
-    # risk-based sizing (so a stop-out costs ~RISK_PER_TRADE_USD, not the whole budget)
     lot, est_risk, vpu = _risk_lot(spec, sl_dist, rc.RISK_PER_TRADE_USD)
-    vol = float((ol.get("metrics") or {}).get("volatility_pct") or 0)
-
-    reasons = ol.get("reasons", [])[:3]
+    reasons = list(a.get("reasons", []))
     reasons.append(
-        f"Simulation: {int(pred['win_prob']*100)}% win odds, {pred['expected_r']:+.2f}R expected; "
-        f"typically plays out in {hold_label} (day-trade, within {window_label}). "
+        f"Simulation: {int(a['win_prob']*100)}% win odds, {a['expected_r']:+.2f}R expected; "
+        f"typically plays out in {a['hold_label']} (day-trade, within {a['window_label']}). "
         f"Sized to risk ≈ ${est_risk if est_risk is not None else rc.RISK_PER_TRADE_USD}.")
 
     prop = {
@@ -365,13 +426,13 @@ async def propose(signal_symbol: str, timeframe: str = None) -> dict:
         "entry_ref": round(price, d),
         "stop_loss": sl,
         "take_profit": tp,
-        "confidence": int(conf),
-        "volatility_pct": round(vol, 2),
-        "win_prob": pred["win_prob"],
-        "expected_r": pred["expected_r"],
-        "horizon_bars": pred["horizon_bars"],
-        "est_hold_min": int(round(hold_min)),
-        "hold_label": hold_label,
+        "confidence": a["confidence"],
+        "volatility_pct": round(a["vol"], 2),
+        "win_prob": a["win_prob"],
+        "expected_r": a["expected_r"],
+        "horizon_bars": a["horizon_bars"],
+        "est_hold_min": a["est_hold_min"],
+        "hold_label": a["hold_label"],
         "est_risk_usd": est_risk,
         "reasons": reasons,
         "status": "pending",
@@ -407,25 +468,80 @@ async def auto_scan() -> dict:
 
     created = 0
     seen = set()
+    cfg = await _trade_settings()
     for tgt in (await _scan_targets())[:10]:
         m = mt5_trader.mt5_symbol(tgt["signal"])
         if not m or m in seen or m in busy:
             continue
         seen.add(m)
         try:
-            res = await propose(tgt["signal"], tgt.get("timeframe", "1h"))
+            res = await propose(tgt["signal"], cfg["timeframe"])
         except Exception as e:  # noqa
             logger.warning(f"auto_scan propose {tgt['signal']} failed: {e}")
             continue
         if res.get("ok"):
             created += 1
-            logger.info(f"auto_scan: queued {res['proposal']['side']} {m}")
+            p = res["proposal"]
+            logger.info(f"auto_scan: queued {p['side']} {m}")
+            # Auto-approve mode: place the strongest setups automatically (demo only).
+            if cfg["auto_approve"] and (p.get("win_prob") or 0) >= cfg["auto_approve_min_winprob"]:
+                try:
+                    ap = await approve(p["id"])
+                    logger.info(f"auto_scan: AUTO-APPROVED {p['side']} {m} -> {ap.get('ok')}")
+                except Exception as e:  # noqa
+                    logger.warning(f"auto_scan auto-approve failed: {e}")
             try:
                 import alerts
-                await alerts.email_proposal(res["proposal"])
+                await alerts.email_proposal(p)
             except Exception as e:  # noqa
                 logger.warning(f"auto_scan email failed: {e}")
     return {"created": created}
+
+
+async def trail_stops() -> dict:
+    """Lock in profit on winning trades: once a trade is +1R, trail the stop-loss
+    to stay 1R behind price (never loosening it). Demo only."""
+    cfg = await _trade_settings()
+    if not cfg["trailing_enabled"]:
+        return {"trailed": 0}
+    try:
+        live = {str(p.get("id")): p for p in (await mt5_trader.positions() or [])}
+    except Exception:  # noqa
+        return {"trailed": 0}
+    trailed = 0
+    for t in await db.trades.find({"status": "open"}, {"_id": 0}).to_list(100):
+        pid = t.get("position_id")
+        pos = live.get(pid)
+        if not pos:
+            continue
+        entry = float(t.get("entry_ref") or pos.get("openPrice") or 0)
+        orig_sl = float(t.get("stop_loss") or 0)
+        risk = abs(entry - orig_sl)
+        cur = float(pos.get("currentPrice") or 0)
+        if risk <= 0 or cur <= 0:
+            continue
+        side = t.get("side")
+        cur_sl = pos.get("stopLoss")
+        d = _digits(cur)
+        if side == "BUY" and (cur - entry) >= risk:
+            new_sl = round(cur - risk, d)
+            if cur_sl is None or new_sl > float(cur_sl) + 1e-9:
+                try:
+                    await mt5_trader.modify_position(pid, new_sl, pos.get("takeProfit"))
+                    await db.trades.update_one({"position_id": pid}, {"$set": {"trail_sl": new_sl}})
+                    trailed += 1
+                except Exception as e:  # noqa
+                    logger.warning(f"trail modify failed {pid}: {e}")
+        elif side == "SELL" and (entry - cur) >= risk:
+            new_sl = round(cur + risk, d)
+            if cur_sl is None or new_sl < float(cur_sl) - 1e-9:
+                try:
+                    await mt5_trader.modify_position(pid, new_sl, pos.get("takeProfit"))
+                    await db.trades.update_one({"position_id": pid}, {"$set": {"trail_sl": new_sl}})
+                    trailed += 1
+                except Exception as e:  # noqa
+                    logger.warning(f"trail modify failed {pid}: {e}")
+    return {"trailed": trailed}
 
 
 async def list_proposals(limit: int = 50) -> list:

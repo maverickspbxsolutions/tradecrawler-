@@ -233,6 +233,11 @@ async def get_settings() -> dict:
             "max_alerts_per_hour": 10,
             "max_emails_per_day": 50,
             "min_minutes_between_same_strategy": 15,
+            "trade_timeframe": "15m",
+            "max_hold_hours": 5,
+            "auto_approve": False,
+            "auto_approve_min_winprob": 0.85,
+            "trailing_enabled": True,
         }
         await db.settings.insert_one(dict(s))
         return s
