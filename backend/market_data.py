@@ -510,7 +510,8 @@ async def get_live(symbol: str, timeframe: str):
             return cached[1]
 
     out = {"symbol": symbol, "timeframe": timeframe, "price": None, "candle": None,
-           "source": None, "available": False, "server_ts": int(now * 1000)}
+           "source": None, "available": False,
+           "reason": _deriv_msg(symbol), "server_ts": int(now * 1000)}
     _live_cache[key] = (now, out)
     return out
 

@@ -1,0 +1,36 @@
+{
+  "summary": "Backend-only test of MT5-only market data endpoints. The code-level fix is CORRECT and verified: (1) NO 502s on any call for BTCUSD/XAUUSD/Volatility 100 Index — all /api/market/candles, /api/market/live, /api/market/outlook return HTTP 200. (2) Responses are FAST (<1s each) — no 20s+ hangs. (3) No binance/coinbase/yahoo fallback is ever used — removed as intended. (4) When MT5 is not ready, endpoints correctly return {available:false, reason:'Live data for this market is temporarily unavailable.'} instead of 502. HOWEVER: in steady state MT5 never becomes ready in this environment because the upstream MetaApi account has exceeded its subscription quota (33/25 used) — see RCA. As a result, available:true with real deriv-mt5 candles was NOT observed for any of the three symbols during this run. This is an external MetaApi account/plan limit, not a code regression.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "/api/market/candles & /api/market/live (all symbols)", "issue": "MT5 subscription never succeeds -> every response is available:false. Root cause (upstream): MetaApi returns TooManyRequestsException 'LIMIT_ACCOUNT_SUBSCRIPTIONS_PER_USER - You have used all your account subscriptions quota. You have 25 account subscriptions available and have used 33 subscriptions.' This blocks the main acceptance criterion (candles+live from source deriv-mt5).", "priority": "CRITICAL"}
+    ],
+    "minor": [
+      {"endpoint": "/api/market/live", "issue": "When MT5 unavailable, response body has no 'reason' field (candles endpoint does include reason). For consistency, include reason on live too."},
+      {"endpoint": "/api/", "issue": "Cold-start of root ping took ~4s on localhost after a restart; external edge timed out once at 15s on the very first login. Not a blocker (60s timeout is enough)."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_market_data_mt5_only.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "URGENT (external): Free MetaApi subscription slots or upgrade plan. Current MetaApi user has 33 account subscriptions but plan allows only 25 -> all subscribe() calls return 429 TooManyRequestsException, so is_ready() stays False forever. Options: (a) go to metaapi.cloud dashboard and UNDEPLOY/delete unused accounts to drop below 25, or (b) upgrade subscription limit. Account id in use: be0b2a17-b7d1-447e-98d8-a8330ec81903 (Deriv-Demo, login 32430043).",
+    "After quota is freed, re-run /app/backend/tests/test_market_data_mt5_only.py — it should pass end-to-end (available:true with source deriv-mt5 for all 3 symbols).",
+    "Code-level nit: in get_live, include the 'reason' field when returning available:false (parity with get_candles)."
+  ],
+  "critical_code_review_comments": [
+    "market_data.py / mt5_trader.py MT5-only logic is correct: no binance/coinbase/yahoo fallbacks remain, ensure_bg() is fire-and-forget, DerivUnavailable is caught in route and returned as 200 {available:false,reason}, asyncio.wait_for timeouts prevent 60s hangs — all four fixes from the problem statement are present and effective.",
+    "Backend .env still contains comment-free secrets as required. However the giant METAAPI_TOKEN JWT is logged repeatedly in supervisor backend.err.log (via engineio client INFO). Consider lowering socketio/engineio logger level to WARNING in production to avoid leaking the full bearer in logs.",
+    "Non-blocking behavior confirmed via timings: XAUUSD and Volatility 100 Index candles responded in 0.17-0.22s even when MT5 was down — previously these produced 502 after a slow retry chain."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_market_data_mt5_only.py"
+  ],
+  "success_rate": {"backend": "code-fix 100% (no 502, fast, MT5-only); data availability 0% (upstream MetaApi quota blocked)", "frontend": "not tested (per request)"},
+  "seed_data_creation": "none",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Use pytest /app/backend/tests/test_market_data_mt5_only.py -n 0 (pytest.ini pins -n 2 --dist loadscope; override with -n 0 for serial). Login timeout should be >=30s because the preview edge occasionally cold-starts. The three symbols BTCUSD, XAUUSD, Volatility 100 Index must return available:true with source containing 'deriv' once MetaApi quota is restored. Current blocker is upstream MetaApi 'LIMIT_ACCOUNT_SUBSCRIPTIONS_PER_USER' (33/25) — visible in /var/log/supervisor/backend.err.log and backend.out.log. No code change required on backend to fix this once the account quota is freed.",
+  "rca of the issue": "RCA: During this test window, every attempt by mt5_trader._bg_connect -> MetaApi StreamingConnection.subscribe raised TooManyRequestsException with metadata {maxSubscriptionsPerUser:25, subscriptionsCount:33, type:'LIMIT_ACCOUNT_SUBSCRIPTIONS_PER_USER'}. Because subscribe never succeeds, is_ready() returns False indefinitely, so get_candles/get_live immediately raise DerivUnavailable and the route returns 200 {available:false, reason}. Reproduction: hit GET /api/market/candles?symbol=BTCUSD&timeframe=1h&limit=200 with a valid bearer -> 200 {available:false,'reason':'Live data for this market is temporarily unavailable.'} in <0.3s. Confirm in /var/log/supervisor/backend.err.log: 'Failed to subscribe {\"name\": \"TooManyRequestsException\" ... subscriptionsCount: 33 ... maxSubscriptionsPerUser: 25}'. Mitigation: (1) Primary — undeploy unused MetaApi accounts in the MetaApi dashboard until subscriptionsCount <= 25 (or upgrade plan); (2) Secondary (code) — the SDK already includes a recommendedRetryTime; mt5_trader.ensure_bg could honor it and surface the specific reason ('MetaApi quota exceeded') back through DerivUnavailable so the frontend can show a precise error instead of the generic 'temporarily unavailable'. The core bug fix for 502s / slow responses / cross-exchange fallbacks is confirmed working."
+}

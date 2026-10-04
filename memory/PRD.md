@@ -236,3 +236,9 @@ Approve-each-trade engine on the connected Deriv MT5 DEMO account via MetaApi.
 - P2: More indicators (Bollinger, ATR stops), multi-timeframe confluence.
 - P2: Persisted equity snapshots for intraday paper curve granularity.
 - P2: SymbolCombobox virtualization if symbol count grows.
+
+## Fix: charts not loading / too slow + MT5-ONLY data (FIXED — 2026-10-04, testing_agent verified)
+- User reported charts not loading / loading slowly, and instructed: use ONLY Deriv/MT5 — remove binance/coinbase/yahoo entirely.
+- Root cause: when MT5 ready was False, get_candles diverted Gold/synthetics to crypto exchanges (binance.us 400 / coinbase 404) -> slow retry chain -> HTTP 502; cold requests could block up to 60s on a blocking MT5 reconnect.
+- Fix (market_data.py + mt5_trader.py): get_candles/get_live are now MT5/Deriv ONLY (all other sources removed). Requests NEVER block on connect — mt5_trader.is_ready() gate + ensure_bg() fire-and-forget reconnect; MT5 fetches wrapped in short asyncio.wait_for; stale _cache served during transient drops; DerivUnavailable -> route returns 200 {available:false,reason} (never 502). live response includes reason when unavailable.
+- testing_agent iteration_10.json: code fix 100% (no 502, <1s, MT5-only, friendly unavailable). It hit an EXTERNAL MetaApi quota (TooManyRequests: 33/25 subscriptions) from repeated dev restarts; cleared on its own and all three symbols (BTCUSD/XAUUSD/Volatility 100 Index) then returned available:true from deriv-mt5 in ~0.6s. NOTE: avoid rapid backend restarts — each adds a MetaApi subscription (max 25/user).
