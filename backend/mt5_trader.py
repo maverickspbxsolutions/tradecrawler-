@@ -31,6 +31,7 @@ SYMBOL_MAP = {
 _state = {"conn": None, "account": None, "ready": False, "connecting": False, "error": None}
 _lock: asyncio.Lock | None = None
 _universe = {"t": 0.0, "list": None}
+_api = None  # single reused MetaApi client (avoids piling up account subscriptions)
 
 # valid MT5 symbol names (the mapped targets) for pass-through matching
 _MT5_SYMBOLS = set(SYMBOL_MAP.values())
@@ -64,7 +65,7 @@ def status() -> dict:
 
 
 async def _connect():
-    global _lock
+    global _lock, _api
     if _lock is None:
         _lock = asyncio.Lock()
     async with _lock:
@@ -72,9 +73,20 @@ async def _connect():
             return _state["conn"]
         _state["connecting"] = True
         _state["error"] = None
+        conn = None
+        # close any previous connection first so we don't leak account
+        # subscriptions on MetaApi's side (max 25/user) across reconnects
+        old = _state.get("conn")
+        if old is not None:
+            try:
+                old.close()
+            except Exception:  # noqa
+                pass
+            _state["conn"] = None
         try:
-            api = MetaApi(os.environ["METAAPI_TOKEN"])
-            account = await api.metatrader_account_api.get_account(os.environ["MT5_ACCOUNT_ID"])
+            if _api is None:
+                _api = MetaApi(os.environ["METAAPI_TOKEN"])
+            account = await _api.metatrader_account_api.get_account(os.environ["MT5_ACCOUNT_ID"])
             await account.wait_connected()
             conn = account.get_rpc_connection()
             await conn.connect()
@@ -83,7 +95,21 @@ async def _connect():
             logger.info("MT5 RPC connection ready")
             return conn
         except Exception as e:  # noqa
-            _state.update(ready=False, connecting=False, error=str(e), last_fail=time.time())
+            # Dispose the client so its socket stops reconnecting (and holding a
+            # subscription slot) during the back-off window.
+            try:
+                if conn is not None:
+                    conn.close()
+            except Exception:  # noqa
+                pass
+            try:
+                if _api is not None:
+                    _api.close()
+            except Exception:  # noqa
+                pass
+            _api = None
+            _state.update(conn=None, account=None, ready=False, connecting=False,
+                          error=str(e), last_fail=time.time())
             logger.error(f"MT5 connect failed: {e}")
             raise
 
@@ -124,7 +150,7 @@ def ensure_bg():
 
 RPC_TIMEOUT = 15        # fail fast on a single RPC call instead of hanging
 CONNECT_TIMEOUT = 60    # first sync can be slow, but must not hang forever
-CONNECT_COOLDOWN = 45   # after a failed connect, reject fast for this long
+CONNECT_COOLDOWN = 120  # after a failed connect, back off long to avoid churn
 
 
 async def warmup():
@@ -135,14 +161,33 @@ async def warmup():
             pass
 
 
+async def shutdown():
+    """Release the account subscription on shutdown so restarts don't leak
+    MetaApi subscriptions (max 25/user)."""
+    global _api
+    conn = _state.get("conn")
+    if conn is not None:
+        try:
+            conn.close()
+        except Exception:  # noqa
+            pass
+    if _api is not None:
+        try:
+            _api.close()
+        except Exception:  # noqa
+            pass
+    _state.update(conn=None, account=None, ready=False)
+    _api = None
+
+
 async def _rpc(coro, timeout=None):
-    """Run an MT5 RPC with a hard timeout so a degraded connection can't hang
-    an HTTP request forever. On timeout, drop the cached connection so the next
-    call reconnects."""
+    """Run an MT5 RPC with a hard timeout so a degraded connection can't hang an
+    HTTP request forever. We do NOT drop the connection on a single slow call —
+    that caused a reconnect storm that exhausted MetaApi's subscription quota.
+    The connection is only rebuilt on an explicit connect failure."""
     try:
         return await asyncio.wait_for(coro, timeout or RPC_TIMEOUT)
     except asyncio.TimeoutError:
-        _state["ready"] = False
         _state["error"] = "RPC timeout"
         raise RuntimeError("MT5 request timed out")
 

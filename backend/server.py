@@ -130,4 +130,9 @@ async def root():
 
 @app.on_event("shutdown")
 async def shutdown():
+    try:
+        import mt5_trader
+        await mt5_trader.shutdown()
+    except Exception:  # noqa
+        pass
     client.close()
