@@ -555,6 +555,43 @@ async def list_proposals(limit: int = 50) -> list:
     return items
 
 
+async def _fresh_stops(p: dict, spec: dict):
+    """Re-anchor SL/TP to the CURRENT market price at approval time. The stored
+    stops were computed when the proposal was created and go stale as price
+    drifts, which makes the broker reject the order ('Invalid stops'). We keep
+    the proposal's risk distance but recompute from live price, enforce the
+    broker's minimum stop distance (+ a buffer for spread), and round to ticks."""
+    side = p["side"]
+    entry_ref = float(p.get("entry_ref") or 0)
+    risk = abs(entry_ref - float(p.get("stop_loss") or 0)) or entry_ref * 0.003
+
+    # live price (mid); fall back to the proposal reference if unavailable
+    price = entry_ref
+    try:
+        lp = await mt5_trader.live_price(p["mt5_symbol"])
+        price = float(lp.get("price") or entry_ref)
+    except Exception:  # noqa
+        pass
+
+    digits = int(spec.get("digits") or _digits(price))
+    tick = float(spec.get("tickSize") or (10 ** -digits))
+    # minimum allowed stop distance from the broker, with a safety buffer
+    min_stop = _min_stop_dist(spec)
+    sl_dist = max(risk, min_stop * 1.5, price * 0.0008)
+    tp_dist = 1.5 * sl_dist
+
+    def _snap(v):
+        return round(round(v / tick) * tick, digits) if tick else round(v, digits)
+
+    if side == "BUY":
+        sl = _snap(price - sl_dist)
+        tp = _snap(price + tp_dist)
+    else:
+        sl = _snap(price + sl_dist)
+        tp = _snap(price - tp_dist)
+    return sl, tp, round(price, digits)
+
+
 async def approve(proposal_id: str) -> dict:
     p = await db.trade_proposals.find_one({"id": proposal_id}, {"_id": 0})
     if not p:
@@ -571,11 +608,18 @@ async def approve(proposal_id: str) -> dict:
             {"id": proposal_id}, {"$set": {"status": "rejected", "error": block, "decided_at": _now().isoformat()}})
         return {"ok": False, "error": block}
 
+    # recompute stops against the live price so the broker accepts them
+    try:
+        spec = await mt5_trader.symbol_spec(p["mt5_symbol"])
+        sl, tp, entry = await _fresh_stops(p, spec)
+    except Exception as e:  # noqa
+        sl, tp, entry = p["stop_loss"], p["take_profit"], p["entry_ref"]
+
     client_id = f"TC_{p['mt5_symbol'][:6]}_{proposal_id.replace('-', '')[:8]}"
     try:
         result = await mt5_trader.market_order(
             p["mt5_symbol"], p["side"], p["lot"],
-            stop_loss=p["stop_loss"], take_profit=p["take_profit"],
+            stop_loss=sl, take_profit=tp,
             comment="TC", client_id=client_id)
     except Exception as e:  # noqa
         detail = getattr(e, "details", None) or getattr(e, "arguments", None)
@@ -588,6 +632,7 @@ async def approve(proposal_id: str) -> dict:
     await db.trade_proposals.update_one(
         {"id": proposal_id},
         {"$set": {"status": "placed", "order_result": _safe(result),
+                  "stop_loss": sl, "take_profit": tp, "entry_ref": entry,
                   "position_id": position_id, "client_id": client_id,
                   "decided_at": _now().isoformat()}})
     await db.trades.insert_one({
@@ -598,9 +643,9 @@ async def approve(proposal_id: str) -> dict:
         "signal_symbol": p["signal_symbol"],
         "side": p["side"],
         "lot": p["lot"],
-        "entry_ref": p["entry_ref"],
-        "stop_loss": p["stop_loss"],
-        "take_profit": p["take_profit"],
+        "entry_ref": entry,
+        "stop_loss": sl,
+        "take_profit": tp,
         "position_id": position_id,
         "client_id": client_id,
         "status": "open",
