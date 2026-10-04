@@ -101,7 +101,7 @@ export default function Login() {
           </div>
 
           <p className="text-[10px] text-muted-foreground font-mono mt-6 leading-relaxed">
-            TradeCrawler sends suggestions only — not financial advice. It places no orders and never touches a trading account.
+            TradeCrawler can place trades on a Deriv MT5 demo account — but only on your explicit approval, with virtual funds. Not financial advice.
           </p>
         </form>
       </div>

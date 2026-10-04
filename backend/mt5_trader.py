@@ -111,13 +111,21 @@ async def price(sym: str):
     return await conn.get_symbol_price(mt5_symbol(sym) or sym)
 
 
-async def market_order(sym: str, side: str, volume: float, comment: str = "TradeCrawler"):
+async def symbol_spec(sym: str):
+    conn = await ensure()
+    return await conn.get_symbol_specification(mt5_symbol(sym) or sym)
+
+
+async def market_order(sym: str, side: str, volume: float, stop_loss=None,
+                       take_profit=None, comment: str = "TradeCrawler", client_id=None):
     conn = await ensure()
     s = mt5_symbol(sym) or sym
     opts = {"comment": comment[:28]}
+    if client_id:
+        opts["clientId"] = client_id[:64]
     if side == "BUY":
-        return await conn.create_market_buy_order(s, volume, None, None, opts)
-    return await conn.create_market_sell_order(s, volume, None, None, opts)
+        return await conn.create_market_buy_order(s, volume, stop_loss, take_profit, opts)
+    return await conn.create_market_sell_order(s, volume, stop_loss, take_profit, opts)
 
 
 async def close_position(position_id: str):

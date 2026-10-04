@@ -133,8 +133,31 @@ out-of-sample validation and market-regime detection.
   current-price tag, crosshair with OHLC+time readout, 3s live updates.
 - Verified: XAUUSD/Volatility 75/BTCUSD candles+live+outlook via MT5; Gold & "100 Index" backtests run
   on real MT5 data; chart screenshot confirms MT5 look.
-- PENDING (NOT built yet): the approve-each-trade flow + risk engine (max stake 2, $10 daily kill-switch,
-  Gold+BTC only) + trading UI. Connection & trade primitives are ready; app still places NO real orders.
+
+## Demo Trade Execution Engine (BUILT — 2026-10-04, agent-tested)
+Approve-each-trade engine on the connected Deriv MT5 DEMO account via MetaApi.
+- Files: `backend/risk_config.py`, `backend/trade_engine.py`, `backend/mt5_trader.py` (market_order
+  now takes SL/TP + clientId; added symbol_spec), routes under `/api/trades/*`,
+  `frontend/src/components/TradePanel.jsx` (wired into Dashboard right column).
+- Flow: Scan Gold/BTC -> engine builds a PROPOSAL -> Approval Queue (approve/reject) -> on approve the
+  server runs risk checks and places a market order with SL/TP. Nothing auto-executes.
+- Smart logic (anti "willy-nilly"): only proposes when outlook confidence >= 58% AND a forward
+  Monte-Carlo simulation (drift tilted by the live outlook, 600 paths, 24-bar horizon) shows
+  win_prob >= 0.45 and expected >= 0.05R. SL/TP from ATR (1.5R reward:risk), respects broker stopsLevel.
+- Risk-based sizing: lot computed so a stop-out loses ≈ RISK_PER_TRADE_USD ($12.50 = limit/(maxpos+1))
+  using value_per_unit = contractSize (Deriv CFDs expose no tickValue; USD profit ccy). Clamped to the
+  symbol's volume step/min/max and MAX_LOT (10). Verified: BTC proposal sized to 0.05 lots / ~$11.59 risk.
+- Hard caps (risk_config.py): demo-env lock (refuses non-demo account), Gold/BTC allowlist, MAX_LOT 10,
+  MAX_OPEN_POSITIONS 3 (concurrent cap verified: 4th blocked), $50 daily loss limit.
+- KILL SWITCH IS DEMO-DISABLED per user: ENFORCE_KILL_SWITCH = (TRADE_ENV != "demo") -> False on demo.
+  Daily P&L still tracked/shown (tracking-only). Re-arms automatically when TRADE_ENV flips to live.
+- clientId must be `strategyId_positionId_orderId` format (underscores), comment+clientId <= 30 chars.
+  Engine uses `TC_<SYM6>_<uuid8>` with comment "TC".
+- Endpoints: GET /trades/account, /trades/pnl, /trades/positions, /trades/log;
+  POST /trades/propose, /trades/proposals/{id}/approve, /trades/proposals/{id}/reject,
+  /trades/positions/{id}/close. All agent-tested via curl (place+SL/TP, reject, concurrent cap, close).
+- requirements.txt updated (pip freeze) so metaapi_cloud_sdk + pandas/numpy persist for deploy.
+- NOT user-confirmed in production yet. Live trading stays OFF until explicit go-live.
 
 ## Known Caveats
 - Deriv market data (Gold, Volatility Indices, forex, stock indices) is UNREACHABLE from the

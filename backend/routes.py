@@ -19,6 +19,7 @@ from scheduler import POLL_SECONDS, EVOLVE_SECONDS
 from evolution import evolve_strategy, detect_regime
 from outlook import compute_outlook
 import risk_config
+import trade_engine
 
 api = APIRouter(prefix="/api", dependencies=[Depends(get_current_user)])
 
@@ -27,6 +28,69 @@ api = APIRouter(prefix="/api", dependencies=[Depends(get_current_user)])
 async def get_risk_config():
     """Demo-only trade risk caps (kill switch, max lot, allowlist)."""
     return risk_config.as_dict()
+
+
+# ---------------- demo trade execution (approve-each-trade) ----------------
+class ProposeInput(BaseModel):
+    symbol: str
+    timeframe: str = "1h"
+
+
+@api.get("/trades/account")
+async def trades_account():
+    return await trade_engine.account_summary()
+
+
+@api.get("/trades/pnl")
+async def trades_pnl():
+    return await trade_engine.daily_pnl()
+
+
+@api.post("/trades/propose")
+async def trades_propose(body: ProposeInput):
+    res = await trade_engine.propose(body.symbol, body.timeframe)
+    if not res.get("ok"):
+        raise HTTPException(400, res.get("error", "Could not build a proposal."))
+    return res["proposal"]
+
+
+@api.get("/trades/proposals")
+async def trades_proposals(limit: int = 50):
+    return await trade_engine.list_proposals(limit)
+
+
+@api.post("/trades/proposals/{pid}/approve")
+async def trades_approve(pid: str):
+    res = await trade_engine.approve(pid)
+    if not res.get("ok"):
+        raise HTTPException(400, res.get("error", "Approval failed."))
+    return res["proposal"]
+
+
+@api.post("/trades/proposals/{pid}/reject")
+async def trades_reject(pid: str):
+    res = await trade_engine.reject(pid)
+    if not res.get("ok"):
+        raise HTTPException(400, res.get("error", "Reject failed."))
+    return res["proposal"]
+
+
+@api.get("/trades/positions")
+async def trades_positions():
+    return await trade_engine.open_positions()
+
+
+@api.get("/trades/log")
+async def trades_log(limit: int = 50):
+    return await trade_engine.trade_log(limit)
+
+
+@api.post("/trades/positions/{position_id}/close")
+async def trades_close(position_id: str):
+    res = await trade_engine.close(position_id)
+    if not res.get("ok"):
+        raise HTTPException(400, res.get("error", "Close failed."))
+    return res
 
 
 async def _auto_evaluate(sid: str):

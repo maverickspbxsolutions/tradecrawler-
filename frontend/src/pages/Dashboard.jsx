@@ -15,6 +15,7 @@ import { PaperPanel } from "@/components/PaperPanel";
 import { StrategyFormDialog } from "@/components/StrategyFormDialog";
 import { SettingsDialog } from "@/components/SettingsDialog";
 import { EvolutionPanel } from "@/components/EvolutionPanel";
+import { TradePanel } from "@/components/TradePanel";
 
 export default function Dashboard() {
   const [selectedId, setSelectedId] = useState(null);
@@ -64,9 +65,10 @@ export default function Dashboard() {
             <PriceChart symbol={selected?.symbol || "BTCUSDT"} tf={tf} onTfChange={setTf} />
             <MarketOutlook symbol={selected?.symbol || "BTCUSDT"} tf={tf} />
             <SignalFeed />
-            <MiniSimulations strategy={selected} />
+          <MiniSimulations strategy={selected} />
           </div>
-          <div className="lg:col-span-4">
+          <div className="lg:col-span-4 space-y-3">
+            <TradePanel />
             <StrategyList
               strategies={strategies}
               selectedId={selectedId}
@@ -87,7 +89,7 @@ export default function Dashboard() {
         </div>
 
         <footer className="mt-6 py-4 border-t border-border/40 text-[10px] font-mono text-muted-foreground text-center uppercase tracking-[0.15em]">
-          TradeCrawler sends suggestions only · not financial advice · no orders are ever placed
+          TradeCrawler · demo trading on virtual funds · every trade needs your approval · not financial advice
         </footer>
       </main>
 
