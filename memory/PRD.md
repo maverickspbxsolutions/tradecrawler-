@@ -174,6 +174,18 @@ Approve-each-trade engine on the connected Deriv MT5 DEMO account via MetaApi.
 - Gold min-lot note: XAUUSD contractSize=100, minVolume=0.01 -> smallest gold trade risks ~$34 (can't go
   lower). Crypto/synthetics (contractSize 1) size finely to the ~$12.50 target.
 
+## Bidirectional trading + email on discovery (BUILT — 2026-10-04, agent-tested)
+- The engine trades BOTH directions: outlook "Up" -> BUY (long), "Down" -> SELL (short). Verified live:
+  queue holds a SELL XAUUSD (predicts fall) and a BUY BTCUSD (predicts rise) simultaneously.
+- New email on auto-discovery: `alerts.email_proposal(prop)` + `alerts._proposal_html(prop)` send a
+  BUY/SELL trade-idea email (entry/SL/TP, lot, sim win odds, expected R, risk) with an "Open TradeCrawler
+  to APPROVE or REJECT" call-to-action and a demo/not-advice disclaimer. SELL emails are framed as SHORT
+  entries ("predicts {sym} will fall (go red)"), not position exits.
+  `trade_engine.auto_scan` calls it when a new proposal is queued. Verified: both templates render and a
+  send returned a Resend id (so a recipient IS configured and emails deliver).
+- Spam control: per (symbol, side) cooldown (>=30m) + existing daily email cap (50). Dedup keeps exactly
+  one pending proposal per symbol+side (verified).
+
 ## Known Caveats
 - Deriv market data (Gold, Volatility Indices, forex, stock indices) is UNREACHABLE from the
   Emergent builder/preview egress (Cloudflare HTTP 520). Deriv instruments still appear in the picker

@@ -251,6 +251,101 @@ def _recipients(settings: dict) -> list:
     return [e.strip() for e in emails if e and e.strip()]
 
 
+def _proposal_html(prop: dict) -> str:
+    side = prop.get("side")
+    is_buy = side == "BUY"
+    color = "#00E676" if is_buy else "#FF3366"
+    sym = escape(str(prop.get("mt5_symbol", "")))
+    entry = prop.get("entry_ref", 0)
+    sl = prop.get("stop_loss", 0)
+    tp = prop.get("take_profit", 0)
+    lot = prop.get("lot", 0)
+    risk = prop.get("est_risk_usd")
+    conf = prop.get("confidence", 0)
+    win = prop.get("win_prob")
+    er = prop.get("expected_r")
+
+    if is_buy:
+        headline = (f"The crawler predicts <strong style=\"color:#00E676\">{sym} will rise</strong> "
+                    f"and found a <strong>BUY (long)</strong> trade to profit from the move up.")
+    else:
+        headline = (f"The crawler predicts <strong style=\"color:#FF3366\">{sym} will fall (go red)</strong> "
+                    f"and found a <strong>SELL (short)</strong> trade to profit from the move down.")
+
+    win_line = (f'<p style="font-size:15px;margin:2px 0">Simulation: '
+                f'<strong>{int(win*100)}% win odds</strong>, '
+                f'<strong>{er:+.2f}R</strong> expected.</p>') if win is not None and er is not None else ""
+    risk_line = (f'<p style="font-size:15px;margin:2px 0">Sized to risk about '
+                 f'<strong>${risk:,.2f}</strong> if the stop-loss hits.</p>') if risk is not None else ""
+
+    return (
+        f'<table role="presentation" width="100%" style="background:#0A0A0C;padding:24px">'
+        f'<tr><td style="font-family:Arial,sans-serif;color:#EDEDED">'
+        f'<p style="font-size:12px;letter-spacing:2px;color:#8A8A93;text-transform:uppercase">'
+        f'{escape(EMAIL_FROM_NAME)} &middot; Demo Trade Idea</p>'
+        f'<h1 style="color:{color};margin:8px 0;font-size:30px">{escape(side)} {sym}</h1>'
+        f'<p style="font-size:15px;margin:6px 0">{headline}</p>'
+        f'<p style="font-size:16px;margin:14px 0 4px"><strong>The plan:</strong></p>'
+        f'<p style="font-size:15px;margin:2px 0">Entry around <strong>{entry:,.4f}</strong> &middot; '
+        f'{lot} lots.</p>'
+        f'<p style="font-size:15px;margin:2px 0">Take-profit: '
+        f'<strong style="color:#00E676">{tp:,.4f}</strong> &middot; '
+        f'Stop-loss: <strong style="color:#FF3366">{sl:,.4f}</strong>.</p>'
+        f'<p style="font-size:15px;margin:2px 0">Confidence <strong>{conf}%</strong>.</p>'
+        f'{win_line}{risk_line}'
+        f'<div style="background:#00E5FF;color:#000;padding:12px;font-size:14px;'
+        f'font-weight:bold;margin-top:16px;text-align:center;border-radius:6px">'
+        f'Open TradeCrawler to APPROVE or REJECT this trade</div>'
+        f'<div style="background:#FFE600;color:#000;padding:10px;font-size:11px;'
+        f'font-weight:bold;letter-spacing:1px;margin-top:14px;text-align:center">'
+        f'DEMO ACCOUNT &middot; VIRTUAL FUNDS &middot; NOT FINANCIAL ADVICE &middot; NO ORDER IS PLACED WITHOUT YOUR APPROVAL</div>'
+        f'<p style="font-size:11px;color:#565660;margin-top:16px">Sent by {escape(EMAIL_FROM_NAME)}. '
+        f'We never ask for your password or payment details by email.</p>'
+        f'</td></tr></table>'
+    )
+
+
+async def email_proposal(prop: dict) -> dict:
+    """Email the user when the bot finds a new BUY or SELL trade idea (demo).
+    Respects recipients, a per-symbol+side cooldown, and the daily cap."""
+    settings = await get_settings()
+    recipients = _recipients(settings)
+    if not settings.get("email_enabled") or not recipients:
+        return {"sent": False, "reason": "email disabled or no recipients"}
+
+    now = datetime.now(timezone.utc)
+    key = f"proposal:{prop.get('mt5_symbol')}:{prop.get('side')}"
+    cooldown = settings.get("min_minutes_between_same_strategy", 15)
+    cutoff = (now - timedelta(minutes=max(cooldown, 30))).isoformat()
+    if await db.alerts.count_documents({"idempotency_key": {"$regex": f"^{key}"}, "sent_at": {"$gte": cutoff}}):
+        return {"sent": False, "reason": "cooldown"}
+
+    day_cutoff = (now - timedelta(days=1)).isoformat()
+    daily = await db.alerts.count_documents({"channel": "email", "sent_at": {"$gte": day_cutoff}})
+    if daily >= settings.get("max_emails_per_day", 50):
+        return {"sent": False, "reason": "daily cap"}
+
+    try:
+        subject = f"[{prop['side']}] {prop['mt5_symbol']} — TradeCrawler found a trade (approve in app)"
+        email_id = await send_email(to=recipients, subject=subject, html=_proposal_html(prop))
+        await db.alerts.insert_one({
+            "idempotency_key": f"{key}:{prop.get('id')}",
+            "proposal_id": prop.get("id"),
+            "channel": "email",
+            "kind": "proposal",
+            "symbol": prop.get("mt5_symbol"),
+            "side": prop.get("side"),
+            "to": recipients,
+            "email_id": email_id,
+            "sent_at": now.isoformat(),
+        })
+        return {"sent": True, "id": email_id}
+    except Exception as e:  # noqa
+        logger.error(f"Proposal email failed: {e}")
+        return {"sent": False, "reason": str(e)}
+
+
+
 async def maybe_send_alert(signal: dict, strategy: dict) -> dict:
     """Apply gating, dedup and rate-limits. Returns dict describing what happened."""
     result = {"emailed": False, "reason": None}

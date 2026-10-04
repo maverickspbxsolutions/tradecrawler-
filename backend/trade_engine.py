@@ -397,6 +397,11 @@ async def auto_scan() -> dict:
         if res.get("ok"):
             created += 1
             logger.info(f"auto_scan: queued {res['proposal']['side']} {m}")
+            try:
+                import alerts
+                await alerts.email_proposal(res["proposal"])
+            except Exception as e:  # noqa
+                logger.warning(f"auto_scan email failed: {e}")
     return {"created": created}
 
 
