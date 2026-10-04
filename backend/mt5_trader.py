@@ -99,6 +99,29 @@ async def ensure():
     return await asyncio.wait_for(_connect(), CONNECT_TIMEOUT)
 
 
+def is_ready() -> bool:
+    return bool(_state["ready"] and _state["conn"])
+
+
+async def _bg_connect():
+    try:
+        await asyncio.wait_for(_connect(), CONNECT_TIMEOUT)
+    except Exception as e:  # noqa
+        logger.warning(f"MT5 background connect failed: {e}")
+
+
+def ensure_bg():
+    """Fire-and-forget (re)connect so user requests never block on a slow connect."""
+    if _state["ready"] or _state["connecting"]:
+        return
+    if time.time() - _state.get("last_fail", 0) < CONNECT_COOLDOWN:
+        return
+    try:
+        asyncio.get_event_loop().create_task(_bg_connect())
+    except RuntimeError:
+        pass
+
+
 RPC_TIMEOUT = 15        # fail fast on a single RPC call instead of hanging
 CONNECT_TIMEOUT = 60    # first sync can be slow, but must not hang forever
 CONNECT_COOLDOWN = 45   # after a failed connect, reject fast for this long

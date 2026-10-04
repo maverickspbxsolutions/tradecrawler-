@@ -118,15 +118,14 @@ async def warm_mt5_universe():
 
 
 def mt5_ready_symbol(symbol: str):
-    """Resolve our symbol to an MT5 symbol if MT5 is ready and has it."""
-    if not (mt5_trader.is_configured() and mt5_trader.status().get("ready")):
+    """Resolve our symbol to its MT5 symbol. Not gated on live-connection state —
+    get_candles reconnects on demand; this just maps the name so a transient MT5
+    drop doesn't divert us anywhere else (we are MT5/Deriv-only)."""
+    if not mt5_trader.is_configured():
         return None
     if symbol in _mt5_universe_set:
         return symbol
-    m = mt5_trader.mt5_symbol(symbol)
-    if m and m in _mt5_universe_set:
-        return m
-    return None
+    return mt5_trader.mt5_symbol(symbol)
 
 
 # ---------------- Deriv (forex, commodities, crypto, indices, synthetics) ----------------
@@ -431,84 +430,43 @@ async def _fetch_coinbase(symbol: str, timeframe: str, limit: int):
 
 
 async def get_candles(symbol: str, timeframe: str, limit: int = 300, closed_only: bool = True):
-    """Return list of candle dicts (ascending by time). Closed candles only."""
+    """Return candle dicts (ascending). MT5/Deriv ONLY — no other data sources."""
     if timeframe not in TIMEFRAMES:
         raise ValueError(f"Unsupported timeframe: {timeframe}")
 
-    # Prefer REAL Deriv data via MT5/MetaApi — identical to what the user trades on.
     msym = mt5_ready_symbol(symbol)
-    if msym:
-        mkey = f"mt5:{msym}:{timeframe}:{limit}:{closed_only}"
-        mnow = time.time()
-        mc = _cache.get(mkey)
-        if mc and mnow - mc[0] < _CACHE_TTL:
+    if not msym:
+        raise DerivUnavailable(_deriv_msg(symbol))
+
+    mkey = f"mt5:{msym}:{timeframe}:{limit}:{closed_only}"
+    mnow = time.time()
+    mc = _cache.get(mkey)
+    if mc and mnow - mc[0] < _CACHE_TTL:
+        return mc[1]
+    # Never block a chart request on a slow (re)connect: if MT5 isn't ready yet,
+    # kick off a background connect and serve cached data (or a friendly message).
+    if not mt5_trader.is_ready():
+        mt5_trader.ensure_bg()
+        if mc:
             return mc[1]
-        try:
-            rows = await mt5_trader.candles(msym, timeframe, limit, closed_only)
-            if rows:
-                health.update({"last_ok": mnow, "source": "deriv-mt5", "error": None})
-                _cache[mkey] = (mnow, rows)
-                return rows
-        except Exception as e:  # noqa
-            logger.warning(f"MT5 candles failed {symbol}->{msym}: {e}")
-
-    if _is_deriv_symbol(symbol):
-        yf = _yahoo_for(symbol)
-        if yf:
-            try:
-                candles = await _fetch_yahoo(yf, timeframe, limit, closed_only)
-                if candles:
-                    health.update({"last_ok": time.time(), "source": "yahoo", "error": None})
-                    return candles
-            except Exception as e:  # noqa
-                logger.warning(f"Yahoo fetch failed for {symbol} ({yf}): {e}")
-                raise DerivUnavailable(_deriv_msg(symbol)) from e
-            raise DerivUnavailable(_deriv_msg(symbol))
-        # synthetic/volatility indices: Deriv-only
-        if _deriv_blocked():
-            raise DerivUnavailable(_deriv_msg(symbol))
-        try:
-            return await _get_deriv_candles(symbol, timeframe, limit, closed_only)
-        except Exception as e:  # noqa
-            _block_deriv(60)
-            logger.warning(f"Deriv candles failed for {symbol}: {e}")
-            raise DerivUnavailable(_deriv_msg(symbol)) from e
-
-    key = f"{symbol.upper()}:{timeframe}:{limit}:{closed_only}"
-    now = time.time()
-    cached = _cache.get(key)
-    if cached and now - cached[0] < _CACHE_TTL:
-        return cached[1]
-
-    errors = []
-    candles = None
-    source = None
-    for name, fetch in (("binance.us", _fetch_binance), ("coinbase", _fetch_coinbase)):
-        for attempt in range(2):
-            try:
-                candles = await fetch(symbol, timeframe, limit)
-                source = name
-                break
-            except Exception as e:  # noqa
-                errors.append(f"{name}: {e}")
-                await asyncio.sleep(0.4)
-        if candles:
-            break
-
-    if not candles:
-        health["error"] = "; ".join(errors[-2:])
-        logger.error(f"Market data fetch failed for {symbol} {timeframe}: {health['error']}")
-        if cached:
-            return cached[1]  # serve stale as last resort
-        raise RuntimeError(f"Could not fetch market data: {health['error']}")
-
-    if closed_only and len(candles) > 1:
-        candles = candles[:-1]  # drop currently-forming candle
-    candles = candles[-limit:]
-
-    health.update({"last_ok": now, "source": source, "error": None})
-    _cache[key] = (now, candles)
-    return candles
+        raise DerivUnavailable(_deriv_msg(symbol))
+    try:
+        rows = await asyncio.wait_for(
+            mt5_trader.candles(msym, timeframe, limit, closed_only), 18)
+        if rows:
+            health.update({"last_ok": mnow, "source": "deriv-mt5", "error": None})
+            _cache[mkey] = (mnow, rows)
+            return rows
+    except Exception as e:  # noqa
+        logger.warning(f"MT5 candles failed {symbol}->{msym}: {e}")
+        mt5_trader.ensure_bg()
+        if mc:
+            return mc[1]  # serve stale during a transient MT5 reconnect
+        health["error"] = str(e)
+        raise DerivUnavailable(_deriv_msg(symbol)) from e
+    if mc:
+        return mc[1]
+    raise DerivUnavailable(_deriv_msg(symbol))
 
 
 _live_cache: dict = {}
@@ -516,8 +474,7 @@ _LIVE_TTL = 3  # seconds — near-real-time price/forming candle
 
 
 async def get_live(symbol: str, timeframe: str):
-    """Current price + the in-progress (forming) candle. Short TTL for near-real-time.
-    Deriv may be unreachable here; returns price=None gracefully in that case."""
+    """Current price + in-progress candle from MT5/Deriv ONLY. Short TTL."""
     if timeframe not in TIMEFRAMES:
         raise ValueError(f"Unsupported timeframe: {timeframe}")
     key = f"{symbol.upper()}:{timeframe}"
@@ -526,67 +483,38 @@ async def get_live(symbol: str, timeframe: str):
     if cached and now - cached[0] < _LIVE_TTL:
         return cached[1]
 
-    # Prefer real Deriv MT5 live price + forming candle
     msym = mt5_ready_symbol(symbol)
-    if msym:
+    if msym and mt5_trader.is_ready():
         try:
-            lp = await mt5_trader.live_price(msym)
-            rows = await mt5_trader.candles(msym, timeframe, 2, closed_only=False)
+            lp = await asyncio.wait_for(mt5_trader.live_price(msym), 10)
+            rows = await asyncio.wait_for(
+                mt5_trader.candles(msym, timeframe, 2, closed_only=False), 12)
             candle = rows[-1] if rows else None
             price = lp.get("price") or (candle["c"] if candle else None)
             if candle and price is not None:
                 candle = {**candle, "c": price,
                           "h": max(candle["h"], price), "l": min(candle["l"], price)}
             out = {"symbol": symbol, "timeframe": timeframe, "price": price,
-                   "candle": candle, "source": "deriv-mt5", "server_ts": int(now * 1000)}
+                   "candle": candle, "source": "deriv-mt5", "available": True,
+                   "server_ts": int(now * 1000)}
             _live_cache[key] = (now, out)
             return out
         except Exception as e:  # noqa
             logger.warning(f"MT5 live failed {symbol}->{msym}: {e}")
+            mt5_trader.ensure_bg()
+            if cached:
+                return cached[1]  # serve last known price during a transient drop
+    elif msym:
+        mt5_trader.ensure_bg()
+        if cached:
+            return cached[1]
 
-    candle = None
-    source = None
-    if _is_deriv_symbol(symbol):
-        yf = _yahoo_for(symbol)
-        if yf:
-            try:
-                rows = await _fetch_yahoo(yf, timeframe, 2, closed_only=False)
-                if rows:
-                    candle, source = rows[-1], "yahoo"
-            except Exception as e:  # noqa
-                logger.warning(f"Yahoo live fetch failed for {symbol} ({yf}): {e}")
-        elif not _deriv_blocked():
-            try:
-                rows = await asyncio.wait_for(
-                    _get_deriv_candles(symbol, timeframe, 2, closed_only=False), 6)
-                if rows:
-                    candle, source = rows[-1], "deriv"
-            except Exception as e:  # noqa
-                _block_deriv(60)
-                logger.warning(f"Deriv live fetch failed for {symbol}: {e}")
-    else:
-        for name, fetch in (("binance.us", _fetch_binance), ("coinbase", _fetch_coinbase)):
-            try:
-                rows = await fetch(symbol, timeframe, 2)  # includes the forming candle
-                if rows:
-                    candle, source = rows[-1], name
-                    break
-            except Exception as e:  # noqa
-                logger.warning(f"{name} live fetch failed for {symbol}: {e}")
-
-    out = {"symbol": symbol, "timeframe": timeframe,
-           "price": (candle["c"] if candle else None),
-           "candle": candle, "source": source, "server_ts": int(now * 1000)}
+    out = {"symbol": symbol, "timeframe": timeframe, "price": None, "candle": None,
+           "source": None, "available": False, "server_ts": int(now * 1000)}
     _live_cache[key] = (now, out)
     return out
 
 
 async def get_last_price(symbol: str):
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.get(f"{BINANCE_BASE}/ticker/price", params={"symbol": symbol.upper()})
-            r.raise_for_status()
-            return float(r.json()["price"])
-    except Exception:
-        candles = await get_candles(symbol, "1m", 2)
-        return candles[-1]["c"] if candles else None
+    candles = await get_candles(symbol, "1m", 2)
+    return candles[-1]["c"] if candles else None
