@@ -18,8 +18,15 @@ from alerts import get_settings, send_email, EMAIL_FROM_NAME
 from scheduler import POLL_SECONDS, EVOLVE_SECONDS
 from evolution import evolve_strategy, detect_regime
 from outlook import compute_outlook
+import risk_config
 
 api = APIRouter(prefix="/api", dependencies=[Depends(get_current_user)])
+
+
+@api.get("/risk/config")
+async def get_risk_config():
+    """Demo-only trade risk caps (kill switch, max lot, allowlist)."""
+    return risk_config.as_dict()
 
 
 async def _auto_evaluate(sid: str):
