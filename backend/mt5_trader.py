@@ -91,7 +91,7 @@ async def _connect():
             conn = account.get_rpc_connection()
             await conn.connect()
             await conn.wait_synchronized()
-            _state.update(conn=conn, account=account, ready=True, connecting=False)
+            _state.update(conn=conn, account=account, ready=True, connecting=False, rpc_fails=0)
             logger.info("MT5 RPC connection ready")
             return conn
         except Exception as e:  # noqa
@@ -151,6 +151,7 @@ def ensure_bg():
 RPC_TIMEOUT = 15        # fail fast on a single RPC call instead of hanging
 CONNECT_TIMEOUT = 60    # first sync can be slow, but must not hang forever
 CONNECT_COOLDOWN = 120  # after a failed connect, back off long to avoid churn
+RPC_FAIL_LIMIT = 4      # consecutive RPC failures before we force a reconnect
 
 
 async def warmup():
@@ -182,14 +183,29 @@ async def shutdown():
 
 async def _rpc(coro, timeout=None):
     """Run an MT5 RPC with a hard timeout so a degraded connection can't hang an
-    HTTP request forever. We do NOT drop the connection on a single slow call —
-    that caused a reconnect storm that exhausted MetaApi's subscription quota.
-    The connection is only rebuilt on an explicit connect failure."""
+    HTTP request forever.
+
+    We do NOT drop the connection on a single slow/failed call — that caused a
+    reconnect storm that exhausted MetaApi's subscription quota. But if the
+    connection goes half-dead (e.g. the account stops synchronizing to the
+    broker), many calls in a row will fail; after RPC_FAIL_LIMIT consecutive
+    failures we mark the connection not-ready so the cooldown-gated background
+    reconnect can heal it (at most one reconnect per CONNECT_COOLDOWN)."""
     try:
-        return await asyncio.wait_for(coro, timeout or RPC_TIMEOUT)
-    except asyncio.TimeoutError:
-        _state["error"] = "RPC timeout"
-        raise RuntimeError("MT5 request timed out")
+        result = await asyncio.wait_for(coro, timeout or RPC_TIMEOUT)
+        _state["rpc_fails"] = 0
+        return result
+    except Exception as e:  # noqa
+        fails = _state.get("rpc_fails", 0) + 1
+        _state["rpc_fails"] = fails
+        is_timeout = isinstance(e, asyncio.TimeoutError)
+        _state["error"] = "RPC timeout" if is_timeout else str(e)
+        if fails >= RPC_FAIL_LIMIT and _state.get("ready"):
+            logger.warning(f"MT5 RPC failed {fails}x — flagging for reconnect")
+            _state.update(ready=False, last_fail=time.time())
+        if is_timeout:
+            raise RuntimeError("MT5 request timed out")
+        raise
 
 
 async def account_info():
