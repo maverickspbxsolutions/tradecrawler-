@@ -26,6 +26,7 @@ from outlook import compute_outlook
 from evolution import detect_regime
 import indicators as ind
 import learning
+import edge
 import market_data as md
 from alerts import get_settings
 
@@ -423,31 +424,21 @@ async def _analyze(signal_symbol: str, timeframe: str, horizon: int) -> dict:
     if not candles or len(candles) < 60:
         return {"ok": False, "mt5_symbol": mt5_sym, "reason": "Not enough market data yet."}
     ol = compute_outlook(candles, signal_symbol, timeframe)
-    direction = ol.get("direction")
-    conf = float(ol.get("confidence", 50))
-    score = int(ol.get("score", 0))
-    if direction not in ("Up", "Down"):
-        return {"ok": False, "mt5_symbol": mt5_sym, "direction": "Neutral", "confidence": int(conf),
-                "reason": "Outlook is Neutral — no clear buy/sell edge."}
-    if conf < rc.MIN_CONFIDENCE:
-        return {"ok": False, "mt5_symbol": mt5_sym, "direction": direction, "confidence": int(conf),
-                "reason": f"Confidence {int(conf)}% (need {rc.MIN_CONFIDENCE}%+). Holding off."}
 
-    # regime / chop filter: trend-following setups need a real trend (ADX)
-    adx_v = _adx_value(candles)
-    if adx_v < ADX_MIN:
-        return {"ok": False, "mt5_symbol": mt5_sym, "direction": direction, "confidence": int(conf),
-                "reason": f"Weak/choppy trend (ADX {adx_v:.0f} < {int(ADX_MIN)}) — skipping."}
-    regime = detect_regime(candles)
-
-    side = "BUY" if direction == "Up" else "SELL"
-
-    # multi-timeframe confluence: never trade against the higher timeframe
+    # Multi-timeframe bias first (confluence input), then the regime-aware edge.
     htf_dir = await _htf_bias(signal_symbol, timeframe)
-    if (side == "BUY" and htf_dir == "Down") or (side == "SELL" and htf_dir == "Up"):
-        return {"ok": False, "mt5_symbol": mt5_sym, "direction": direction, "side": side,
-                "confidence": int(conf),
-                "reason": f"Higher timeframe is {htf_dir} — no multi-timeframe agreement, skipping."}
+    ev = edge.assess(candles, htf_dir)
+    if not ev.get("tradeable"):
+        return {"ok": False, "mt5_symbol": mt5_sym, "direction": ev.get("direction", "Neutral"),
+                "confidence": ev.get("confidence"), "score": ev.get("score"),
+                "regime": ev.get("regime"), "adx": ev.get("adx"), "reason": ev.get("reason")}
+
+    direction = ev["direction"]
+    side = ev["side"]
+    conf = float(ev["confidence"])
+    score = ev["score"] if direction == "Up" else -ev["score"]  # signed for sim drift lean
+    adx_v = ev["adx"]
+    regime = {"trend": ev["regime"]}
 
     # learned edge: stop repeating a setup that's been losing money
     blk = await learning.edge_block(mt5_sym, side)
@@ -457,7 +448,7 @@ async def _analyze(signal_symbol: str, timeframe: str, horizon: int) -> dict:
 
     live = await md.get_live(signal_symbol, timeframe)
     price = float(live.get("price") or candles[-1]["c"])
-    atr = _atr(candles) or price * 0.004
+    atr = ev.get("atr") or _atr(candles) or price * 0.004
     d = _digits(price)
     # prediction-driven SL/TP: simulate several targets, keep the best-EV one
     opt = _optimize_levels(candles, side, price, atr, score, horizon)
@@ -482,23 +473,25 @@ async def _analyze(signal_symbol: str, timeframe: str, horizon: int) -> dict:
             "direction": direction, "side": side, "confidence": int(conf),
             "win_prob": cal_win, "expected_r": cal_ev, "sim_win_prob": pred["win_prob"], "rr": rr,
             "adx": round(adx_v, 0), "htf_dir": htf_dir, "regime": regime.get("trend"),
+            "score": ev.get("score"), "vr": ev.get("vr"),
             "edge_n": es.get("n"), "edge_expectancy": es.get("expectancy_r"),
             "horizon_bars": pred["horizon_bars"], "est_hold_min": int(round(hold_min)),
             "hold_label": hold_label, "window_label": window_label,
             "price": round(price, d), "stop_loss": sl, "take_profit": tp, "sl_dist": sl_dist,
             "vol": float((ol.get("metrics") or {}).get("volatility_pct") or 0),
-            "reasons": ol.get("reasons", [])[:3]}
+            "reasons": (ev.get("reasons") or ol.get("reasons", []))[:4]}
     breakeven = 1.0 / (1.0 + rr)
     win_floor = max(0.33, breakeven + 0.02)  # must clear breakeven with margin
     if cal_win < win_floor or cal_ev < rc.MIN_EXPECTED_R:
         base["ok"] = False
-        base["reason"] = (f"Calibrated {int(cal_win*100)}% win odds at {rr:.1f}:1 → {cal_ev:+.2f}R "
-                          f"expectancy — not a positive edge yet. Waiting.")
+        base["reason"] = (f"{ev['regime'].title()} {side} scored {ev['score']}/100 but calibrated "
+                          f"{int(cal_win*100)}% win at {rr:.1f}:1 → {cal_ev:+.2f}R — not a positive edge. Waiting.")
         return base
     base["ok"] = True
     edge_note = (f" · learned {es['n']} trades {es['expectancy_r']:+.2f}R" if es.get("n") else "")
-    base["reason"] = (f"Tradeable: {int(cal_win*100)}% calibrated win odds, {cal_ev:+.2f}R expectancy "
-                      f"at {rr:.1f}:1, ADX {adx_v:.0f}, hold {hold_label}{edge_note}.")
+    base["reason"] = (f"{ev['regime'].title()} {side} · confluence {ev['score']}/100 · "
+                      f"{int(cal_win*100)}% win, {cal_ev:+.2f}R at {rr:.1f}:1, ADX {adx_v:.0f}, "
+                      f"hold {hold_label}{edge_note}.")
     return base
 
 
@@ -516,6 +509,7 @@ async def scan_status() -> list:
             "tradeable": a.get("ok", False), "side": a.get("side"),
             "direction": a.get("direction"), "confidence": a.get("confidence"),
             "win_prob": a.get("win_prob"), "expected_r": a.get("expected_r"),
+            "regime": a.get("regime"), "score": a.get("score"), "adx": a.get("adx"),
             "hold_label": a.get("hold_label"), "reason": a.get("reason"),
         })
     return out
@@ -594,6 +588,7 @@ async def propose(signal_symbol: str, timeframe: str = None) -> dict:
         "volatility_pct": round(a["vol"], 2),
         "regime": a.get("regime"),
         "adx": a.get("adx"),
+        "score": a.get("score"),
         "htf_dir": a.get("htf_dir"),
         "win_prob": a["win_prob"],
         "expected_r": a["expected_r"],
