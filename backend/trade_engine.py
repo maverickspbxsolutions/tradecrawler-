@@ -523,7 +523,11 @@ async def propose(signal_symbol: str, timeframe: str = None) -> dict:
     if mt5_sym not in await allowed_symbols():
         return {"ok": False, "error": f"{mt5_sym} isn't one of your active instruments. Turn on a strategy for it first."}
 
-    a = await _analyze(signal_symbol, timeframe, cfg["horizon"])
+    try:
+        a = await _analyze(signal_symbol, timeframe, cfg["horizon"])
+    except Exception as e:  # noqa
+        logger.warning(f"propose analyze {signal_symbol} failed: {e}")
+        return {"ok": False, "error": f"Couldn't analyze {mt5_sym} right now: {e}"}
     if not a.get("ok"):
         return {"ok": False, "error": a.get("reason", "No tradeable setup right now.")}
 
@@ -999,3 +1003,30 @@ async def close(position_id: str) -> dict:
 async def edge_report() -> dict:
     """Learned-edge summary (realized expectancy per setup) for the UI."""
     return await learning.edge_report()
+
+
+async def backfill_outcomes() -> int:
+    """One-shot: seed the learner from already-closed trades (so it learns from
+    past losers immediately instead of starting from scratch)."""
+    try:
+        closed = await db.trades.find({"status": "closed"}, {"_id": 0}).to_list(1000)
+        have = {o.get("position_id") for o in
+                await db.trade_outcomes.find({}, {"_id": 0, "position_id": 1}).to_list(2000)}
+        n = 0
+        for t in closed:
+            pid = t.get("position_id")
+            if not pid or pid in have:
+                continue
+            profit = t.get("realized_profit")
+            if profit is None:
+                profit = await _realized_profit(pid)
+            if profit is None:
+                profit = t.get("last_profit", 0)
+            await learning.record_outcome(t, profit, t.get("planned_risk"))
+            n += 1
+        if n:
+            logger.info(f"backfilled {n} historical trade outcomes into the learner")
+        return n
+    except Exception as e:  # noqa
+        logger.warning(f"backfill_outcomes failed: {e}")
+        return 0

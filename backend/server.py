@@ -118,10 +118,12 @@ async def on_startup():
 
 async def _warm_mt5():
     import mt5_trader
+    import trade_engine
     if mt5_trader.is_configured():
         await mt5_trader.warmup()
         await md.warm_mt5_universe()
         await md.warm_candles()
+        await trade_engine.backfill_outcomes()
 
 
 @app.get("/api/")
