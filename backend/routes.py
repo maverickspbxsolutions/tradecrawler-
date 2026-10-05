@@ -125,54 +125,31 @@ async def _auto_evaluate(sid: str):
 # ---------------- Market ----------------
 @api.get("/market/symbols")
 async def symbols():
-    # Prefer the REAL Deriv MT5 universe (same instruments the user trades)
+    # The REAL Deriv MT5 universe (same instruments the user trades). MT5 only.
     mt5_opts = await md.build_mt5_options()
-    if mt5_opts:
-        def rank_mt5(o):
-            n = (o["symbol"] + " " + o["market"]).lower()
-            if o["symbol"] in ("XAUUSD",) or "gold" in n:
-                return 0
-            if o["symbol"] in ("BTCUSD",) or n.startswith("btc"):
-                return 1
-            if "volatility" in n:
-                return 2
-            if o["market"] == "Synthetic & Volatility":
-                return 3
-            if o["market"] == "Metals":
-                return 4
-            if o["market"] == "Crypto":
-                return 5
-            if o["market"] == "Stock Indices":
-                return 6
-            return 8
-        ordered = sorted(mt5_opts, key=rank_mt5)
-        return {"options": ordered, "symbols": [o["symbol"] for o in ordered],
-                "default": "BTCUSD", "timeframes": list(md.TIMEFRAMES.keys()),
-                "deriv_available": True, "source": "deriv-mt5"}
 
-    crypto = await md.get_all_symbols()
-    deriv = await md.get_deriv_symbols()
-    options = [{"symbol": s, "label": s.replace("USDT", "") + " / USDT",
-                "market": "Crypto (Binance)", "source": "binance"} for s in crypto]
-
-    def rank(d):
-        lbl = (d["label"] + " " + d["symbol"]).lower()
-        m = d["market"].lower()
-        if "gold" in lbl or d["symbol"] == "frxXAUUSD":
+    def rank_mt5(o):
+        n = (o["symbol"] + " " + o["market"]).lower()
+        if o["symbol"] in ("XAUUSD",) or "gold" in n:
             return 0
-        if d["symbol"].startswith("cry") or "bitcoin" in lbl or "btc" in lbl:
+        if o["symbol"] in ("BTCUSD",) or n.startswith("btc"):
             return 1
-        if "volatility" in m or "volatility" in lbl or d["symbol"].startswith(("R_", "1HZ")):
+        if "volatility" in n:
             return 2
-        return 5
+        if o["market"] == "Synthetic & Volatility":
+            return 3
+        if o["market"] == "Metals":
+            return 4
+        if o["market"] == "Crypto":
+            return 5
+        if o["market"] == "Stock Indices":
+            return 6
+        return 8
 
-    for d in sorted(deriv, key=rank):
-        options.append({"symbol": d["symbol"], "label": d["label"],
-                        "market": f"Deriv · {d['market']}", "source": "deriv"})
-
-    return {"options": options, "symbols": [o["symbol"] for o in options],
-            "default": "BTCUSDT", "timeframes": list(md.TIMEFRAMES.keys()),
-            "deriv_available": len(deriv) > 0, "source": "fallback"}
+    ordered = sorted(mt5_opts or [], key=rank_mt5)
+    return {"options": ordered, "symbols": [o["symbol"] for o in ordered],
+            "default": "BTCUSD", "timeframes": list(md.TIMEFRAMES.keys()),
+            "deriv_available": bool(ordered), "source": "deriv-mt5"}
 
 
 @api.get("/market/candles")

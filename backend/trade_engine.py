@@ -266,19 +266,19 @@ def _value_per_unit(spec: dict) -> float:
     return float(spec.get("contractSize") or 1)
 
 
-def _risk_lot(spec: dict, sl_dist: float, risk_usd: float):
-    """Size the lot so a stop-loss hit loses about `risk_usd`. Clamped to the
-    symbol's volume rules and MAX_LOT."""
+def _clamp_lot(spec: dict, desired: float, sl_dist: float):
+    """Clamp a desired lot to the symbol's volume rules and MAX_LOT, then report
+    the $ risked if the stop-loss is hit."""
     vmin = float(spec.get("minVolume") or spec.get("volumeMin") or rc.MIN_LOT)
     vmax = float(spec.get("maxVolume") or spec.get("volumeMax") or rc.MAX_LOT)
     step = float(spec.get("volumeStep") or spec.get("lotStep") or 0.01)
     vpu = _value_per_unit(spec)
 
-    raw = risk_usd / (sl_dist * vpu) if (vpu and sl_dist > 0) else vmin
-    lot = np.floor(raw / step) * step if step else raw
+    lot = float(desired)
+    lot = np.floor(lot / step) * step if step else lot
     lot = max(max(vmin, rc.MIN_LOT), min(lot, vmax, rc.MAX_LOT))
     lot = round(lot, 2)
-    est_risk = round(lot * sl_dist * vpu, 2) if vpu else None
+    est_risk = round(lot * sl_dist * vpu, 2) if (vpu and sl_dist > 0) else None
     return lot, est_risk, vpu
 
 
@@ -407,12 +407,14 @@ async def propose(signal_symbol: str, timeframe: str = None) -> dict:
     else:
         sl, tp = round(price + sl_dist, d), round(price - tp_dist, d)
 
-    lot, est_risk, vpu = _risk_lot(spec, sl_dist, rc.RISK_PER_TRADE_USD)
+    desired_lot = rc.confidence_lot(a["confidence"])
+    lot, est_risk, vpu = _clamp_lot(spec, desired_lot, sl_dist)
     reasons = list(a.get("reasons", []))
     reasons.append(
         f"Simulation: {int(a['win_prob']*100)}% win odds, {a['expected_r']:+.2f}R expected; "
         f"typically plays out in {a['hold_label']} (day-trade, within {a['window_label']}). "
-        f"Sized to risk ≈ ${est_risk if est_risk is not None else rc.RISK_PER_TRADE_USD}.")
+        f"Sized at {lot} lots on {a['confidence']}% confidence (risk ≈ "
+        f"${est_risk if est_risk is not None else '—'}).")
 
     prop = {
         "id": str(uuid.uuid4()),
@@ -702,24 +704,49 @@ async def account_summary() -> dict:
 
 
 async def open_positions() -> list:
+    """The bot's open demo trades, driven by our own DB record so they ALWAYS
+    show (and survive a page refresh) even while MT5 is briefly reconnecting.
+    Enriched with live price/P&L when MT5 is reachable; reconciled to 'closed'
+    only when MT5 confirms the position is gone."""
+    db_open = await db.trades.find({"status": "open"}, {"_id": 0}).sort("placed_at", -1).to_list(100)
+    live_map = None
     try:
         rows = await mt5_trader.positions() or []
+        live_map = {str(p.get("id")): p for p in rows}
     except Exception as e:  # noqa
-        logger.warning(f"open_positions failed: {e}")
-        return []
+        logger.warning(f"open_positions live fetch failed (serving last known): {e}")
+
     out = []
-    for p in rows:
-        out.append({
-            "id": str(p.get("id")),
-            "symbol": p.get("symbol"),
-            "type": p.get("type"),
-            "volume": p.get("volume"),
-            "open_price": p.get("openPrice"),
-            "current_price": p.get("currentPrice"),
-            "stop_loss": p.get("stopLoss"),
-            "take_profit": p.get("takeProfit"),
-            "profit": round(float(p.get("unrealizedProfit", p.get("profit", 0)) or 0), 2),
-        })
+    for t in db_open:
+        pid = t.get("position_id")
+        p = live_map.get(pid) if live_map is not None else None
+        if live_map is not None and p is None:
+            # MT5 is reachable and says this position is gone -> mark closed.
+            await db.trades.update_one(
+                {"position_id": pid}, {"$set": {"status": "closed", "closed_at": _now().isoformat()}})
+            continue
+        if p:
+            profit = round(float(p.get("unrealizedProfit", p.get("profit", 0)) or 0), 2)
+            await db.trades.update_one({"position_id": pid}, {"$set": {"last_profit": profit}})
+            out.append({
+                "id": pid, "symbol": p.get("symbol") or t.get("symbol"),
+                "type": p.get("type") or t.get("side"),
+                "volume": p.get("volume") or t.get("lot"),
+                "open_price": p.get("openPrice") or t.get("entry_ref"),
+                "current_price": p.get("currentPrice"),
+                "stop_loss": p.get("stopLoss") or t.get("stop_loss"),
+                "take_profit": p.get("takeProfit") or t.get("take_profit"),
+                "profit": profit, "live": True,
+            })
+        else:
+            # MT5 momentarily unreachable: still show the trade with last known data.
+            out.append({
+                "id": pid, "symbol": t.get("symbol"), "type": t.get("side"),
+                "volume": t.get("lot"), "open_price": t.get("entry_ref"),
+                "current_price": None, "stop_loss": t.get("stop_loss"),
+                "take_profit": t.get("take_profit"),
+                "profit": round(float(t.get("last_profit") or 0), 2), "live": False,
+            })
     return out
 
 

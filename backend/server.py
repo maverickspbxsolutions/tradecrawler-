@@ -109,8 +109,8 @@ async def on_startup():
     await db.strategies.update_many({"auto_evolve": {"$exists": False}}, {"$set": {"auto_evolve": True}})
     await db.strategies.update_many({"gate_passed": True}, {"$set": {"live": True}})
     await db.strategies.update_many({"gate_passed": {"$ne": True}}, {"$set": {"live": False}})
+    await db.candles_cache.create_index("ts")
     asyncio.create_task(bootstrap_engine())
-    asyncio.create_task(md.get_deriv_symbols())  # warm Deriv symbol cache in background
     asyncio.create_task(_warm_mt5())
     start_scheduler()
     logger.info("Crypto Signal Terminal backend started")
@@ -121,6 +121,7 @@ async def _warm_mt5():
     if mt5_trader.is_configured():
         await mt5_trader.warmup()
         await md.warm_mt5_universe()
+        await md.warm_candles()
 
 
 @app.get("/api/")

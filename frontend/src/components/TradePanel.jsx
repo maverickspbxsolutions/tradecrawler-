@@ -163,7 +163,7 @@ export function TradePanel() {
             </div>
           ) : (
             <div className="mt-2 text-[10px] font-mono text-muted-foreground">
-              Demo mode — kill switch is off, this only tracks today's virtual P&L. Each trade is sized to risk ≈ {fmtUsd(limit / 4)}.
+              Demo mode — kill switch is off, this only tracks today's virtual P&L. Trades start at 2 lots and scale up with confidence (max 10).
             </div>
           )}
         </div>

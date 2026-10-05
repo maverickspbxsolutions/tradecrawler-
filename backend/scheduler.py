@@ -12,9 +12,11 @@ logger = logging.getLogger(__name__)
 POLL_SECONDS = 30            # fast loop so closed-candle alerts fire promptly
 EVOLVE_SECONDS = 86400       # daily background evolution
 SCAN_SECONDS = 90            # hunt active instruments for tradeable setups
+CANDLE_WARM_SECONDS = 15     # keep charts' candles warm & advancing (MT5 only)
 _task = None
 _evolve_task = None
 _scan_task = None
+_candle_task = None
 
 
 async def _loop():
@@ -69,12 +71,26 @@ async def _scan_loop():
         await asyncio.sleep(SCAN_SECONDS)
 
 
+async def _candle_loop():
+    import market_data as md
+    await asyncio.sleep(8)
+    logger.info("Candle warm loop started")
+    while True:
+        try:
+            await md.warm_candles()
+        except Exception as e:  # noqa
+            logger.debug(f"Candle warm loop error: {e}")
+        await asyncio.sleep(CANDLE_WARM_SECONDS)
+
+
 def start_scheduler():
-    global _task, _evolve_task, _scan_task
+    global _task, _evolve_task, _scan_task, _candle_task
     if _task is None:
         _task = asyncio.create_task(_loop())
     if _evolve_task is None:
         _evolve_task = asyncio.create_task(_evolve_loop())
     if _scan_task is None:
         _scan_task = asyncio.create_task(_scan_loop())
+    if _candle_task is None:
+        _candle_task = asyncio.create_task(_candle_loop())
     return _task

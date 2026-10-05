@@ -21,6 +21,11 @@ MAX_LOT = 10.0
 # Floor so dynamic sizing never rounds to zero.
 MIN_LOT = 0.01
 
+# Realistic sizing: start at BASE_LOT at the minimum tradeable confidence and
+# scale LINEARLY up to MAX_LOT at ~100% confidence (then clamped to each
+# symbol's own volume rules). The more conviction, the bigger the position.
+BASE_LOT = 2.0
+
 # Max number of the bot's own trades open at the same time (across any symbols).
 MAX_OPEN_POSITIONS = 3
 
@@ -47,12 +52,27 @@ SIM_HORIZON_BARS = 20
 
 def suggest_lot(signal_confidence=None, volatility_pct=None) -> float:
     """Legacy confidence/vol-based sizing (kept for reference). The engine now
-    uses risk-based sizing from the stop-loss distance instead."""
+    uses confidence_lot() for sizing instead."""
     conf = 0.5 if signal_confidence is None else max(0.0, min(1.0, float(signal_confidence)))
     vol = 0.0 if volatility_pct is None else max(0.0, float(volatility_pct))
     vol_factor = 1.0 / (1.0 + vol / 2.0)
     lot = MAX_LOT * conf * vol_factor
     return round(max(MIN_LOT, min(MAX_LOT, lot)), 2)
+
+
+def confidence_lot(confidence) -> float:
+    """Realistic lot sizing: BASE_LOT (2.0) at the minimum tradeable confidence,
+    scaling linearly up to MAX_LOT (10.0) at 100% confidence. The caller then
+    clamps the result to the symbol's own min/max/step volume rules."""
+    try:
+        conf = float(confidence)
+    except (TypeError, ValueError):
+        conf = MIN_CONFIDENCE
+    span = max(1.0, 100.0 - MIN_CONFIDENCE)
+    frac = (conf - MIN_CONFIDENCE) / span
+    frac = max(0.0, min(1.0, frac))
+    lot = BASE_LOT + frac * (MAX_LOT - BASE_LOT)
+    return round(max(BASE_LOT, min(MAX_LOT, lot)), 2)
 
 
 def as_dict() -> dict:
@@ -62,10 +82,12 @@ def as_dict() -> dict:
         "enforce_kill_switch": ENFORCE_KILL_SWITCH,
         "max_lot": MAX_LOT,
         "min_lot": MIN_LOT,
+        "base_lot": BASE_LOT,
         "max_open_positions": MAX_OPEN_POSITIONS,
         "allowed_symbols": list(ALLOWED_SYMBOLS),
         "risk_per_trade_usd": RISK_PER_TRADE_USD,
         "min_confidence": MIN_CONFIDENCE,
         "min_win_prob": MIN_WIN_PROB,
         "dynamic_lot_sizing": True,
+        "confidence_scaled_lots": True,
     }
