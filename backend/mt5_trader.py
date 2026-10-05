@@ -28,7 +28,8 @@ SYMBOL_MAP = {
     "OTC_AS51": "Australia 200", "OTC_HSI": "Hong Kong 50",
 }
 
-_state = {"conn": None, "account": None, "ready": False, "connecting": False, "error": None}
+_state = {"conn": None, "account": None, "ready": False, "connecting": False,
+          "error": None, "last_account": None}
 _lock: asyncio.Lock | None = None
 _universe = {"t": 0.0, "list": None}
 _api = None  # single reused MetaApi client (avoids piling up account subscriptions)
@@ -114,15 +115,21 @@ async def _connect():
             raise
 
 
-async def ensure():
+async def ensure(force: bool = False):
     if _state["ready"] and _state["conn"]:
         return _state["conn"]
-    # back off during a broker outage so requests fail fast instead of each
-    # waiting the full connect timeout
+    # back off during a broker outage so background requests fail fast instead of
+    # each waiting the full connect timeout. An explicit user action (force=True)
+    # bypasses the cooldown and attempts a fresh connect right away.
     since_fail = time.time() - _state.get("last_fail", 0)
-    if since_fail < CONNECT_COOLDOWN:
+    if not force and since_fail < CONNECT_COOLDOWN:
         raise RuntimeError("MT5 temporarily unavailable (broker reconnecting)")
     return await asyncio.wait_for(_connect(), CONNECT_TIMEOUT)
+
+
+def last_account() -> dict | None:
+    """Last successfully-read account info (used to survive a transient drop)."""
+    return _state.get("last_account")
 
 
 def is_ready() -> bool:
@@ -150,7 +157,7 @@ def ensure_bg():
 
 RPC_TIMEOUT = 15        # fail fast on a single RPC call instead of hanging
 CONNECT_TIMEOUT = 60    # first sync can be slow, but must not hang forever
-CONNECT_COOLDOWN = 120  # after a failed connect, back off long to avoid churn
+CONNECT_COOLDOWN = 45   # back off after a failed connect; short enough to self-heal
 RPC_FAIL_LIMIT = 4      # consecutive RPC failures before we force a reconnect
 
 
@@ -208,9 +215,12 @@ async def _rpc(coro, timeout=None):
         raise
 
 
-async def account_info():
-    conn = await ensure()
-    return await _rpc(conn.get_account_information())
+async def account_info(force: bool = False):
+    conn = await ensure(force)
+    info = await _rpc(conn.get_account_information())
+    if info:
+        _state["last_account"] = info
+    return info
 
 
 async def positions():
@@ -235,7 +245,7 @@ async def symbol_spec(sym: str):
 
 async def market_order(sym: str, side: str, volume: float, stop_loss=None,
                        take_profit=None, comment: str = "TradeCrawler", client_id=None):
-    conn = await ensure()
+    conn = await ensure(force=True)  # user-initiated: attempt a fresh connect now
     s = mt5_symbol(sym) or sym
     opts = {"comment": comment[:28]}
     if client_id:

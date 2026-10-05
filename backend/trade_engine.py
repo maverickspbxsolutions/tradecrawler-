@@ -153,9 +153,16 @@ async def _risk_gate(symbol: str, lot: float) -> str | None:
     if active >= rc.MAX_OPEN_POSITIONS:
         return f"Already running {active} trades — the max is {rc.MAX_OPEN_POSITIONS} at once. Close one first."
     try:
-        info = await mt5_trader.account_info()
+        info = await mt5_trader.account_info(force=True)
     except Exception as e:  # noqa
-        return f"Could not reach the trading account: {e}"
+        # Transient broker reconnect: don't hard-block if we've already confirmed
+        # this is a demo account — fall back to the last-known snapshot. The
+        # actual order placement will force a fresh reconnect and will surface a
+        # real error if it genuinely can't place.
+        info = mt5_trader.last_account()
+        if not info:
+            logger.warning(f"risk_gate account unreachable: {e}")
+            return "Trading account is reconnecting — give it a few seconds and tap approve again."
     if not _is_demo(info):
         return "Connected account is NOT a demo account — placement blocked for safety."
     if not info.get("tradeAllowed", True):
@@ -870,13 +877,19 @@ async def _growth_target(current_equity) -> dict:
 
 
 async def account_summary() -> dict:
+    stale = False
     try:
         info = await mt5_trader.account_info()
     except Exception as e:  # noqa
-        return {"available": False, "reason": str(e)}
+        # transient reconnect: show the last-known snapshot instead of "OFFLINE"
+        info = mt5_trader.last_account()
+        stale = True
+        if not info:
+            return {"available": False, "reason": str(e)}
     equity = info.get("equity")
     summary = {
         "available": True,
+        "stale": stale,
         "balance": info.get("balance"),
         "equity": equity,
         "currency": info.get("currency"),

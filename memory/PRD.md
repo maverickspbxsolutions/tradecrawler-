@@ -277,3 +277,13 @@ Root cause of losses: the Monte-Carlo used a PERSISTENT near-certain drift (tilt
 - New endpoint GET /api/trades/edge -> {overall, setups[]}. Fixed: propose() wraps _analyze in try/except (was 500 for some symbols -> now 400 with reason).
 - testing_agent iteration_13: 6/6 pytest pass incl full learn loop (propose->approve->positions->close-> /trades/edge n 0->1). retest_needed:false. Test file: backend/tests/test_adaptive_learning.py.
 - NOTE: demo balance had already dropped (~$10k -> ~$3.6k) from the earlier oversized/overconfident trades; the risk cap (20%), honest odds, ADX/MTF filters and the learner are what reduce future bleed. No profitability is promised.
+
+## FIX FOREVER: "Could not reach the trading account: MT5 temporarily unavailable" (2026-06)
+Error source: trade_engine._risk_gate called mt5_trader.account_info() which raised during the post-failed-connect COOLDOWN window -> approve failed with a scary message. Account is actually reachable ~most of the time; failures were only inside the self-imposed cooldown.
+Code fixes (mt5_trader.py + trade_engine.py):
+- ensure(force=False): explicit USER actions pass force=True to bypass the reconnect cooldown and attempt a fresh connect immediately. market_order() now uses ensure(force=True) so approving a trade always gets a live reconnect attempt.
+- account_info() caches the last successful snapshot (_state['last_account']); last_account() exposes it.
+- _risk_gate(): tries account_info(force=True); on failure falls back to the cached demo snapshot (demo-only is safe to trust) instead of hard-blocking; only blocks with a friendly "reconnecting — try again in a few seconds" if the account was NEVER reached. tradeAllowed check tolerant of cache.
+- account_summary(): serves last-known snapshot with stale:true instead of flipping the panel to OFFLINE during a transient drop.
+- CONNECT_COOLDOWN 120s -> 45s for faster self-heal (safe: a lock + connecting flag ensure only one connect runs at a time, so no storm).
+ROOT CAUSE (account-level, NOT code): the same MetaApi token + MT5 account (be0b2a17...) is shared across preview AND every deployment the user triggers; MetaApi plan allows 25 subscriptions/user, and the contention makes MetaApi drop the account's broker sync ("not connected to broker yet"). The code now masks the transient windows, but the ONLY permanent cure is a SEPARATE MetaApi account/token for production (distinct MT5_ACCOUNT_ID) or a higher MetaApi subscription quota. Verified happy path still works (account avail True, is_demo True).
