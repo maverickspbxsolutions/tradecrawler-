@@ -23,12 +23,19 @@ from db import db
 import mt5_trader
 import risk_config as rc
 from outlook import compute_outlook
+from evolution import detect_regime
+import indicators as ind
+import learning
 import market_data as md
 from alerts import get_settings
 
 logger = logging.getLogger("trade_engine")
 
 PROPOSAL_TTL_MIN = 15  # a proposal's reference price goes stale after this
+
+# Regime / confluence filters (research-grounded edge: trade trends, skip chop)
+ADX_MIN = 20.0          # ADX below this = weak/choppy trend -> skip
+_HTF = {"1m": "15m", "5m": "1h", "15m": "1h", "1h": "4h", "4h": "1d", "1d": "1d"}
 
 
 # ----------------------------- helpers -----------------------------
@@ -200,17 +207,19 @@ async def active_instruments() -> list:
 
 def _predict(candles: list, side: str, entry: float, sl: float, tp: float,
              score: int, horizon: int = None) -> dict:
-    """Forward Monte-Carlo: simulate many price paths (drift tilted by the live
-    outlook) and measure how often the trade reaches TP before SL. Returns win
-    probability and expected value in R (risk) multiples."""
+    """Forward Monte-Carlo with HONEST drift. Intraday price is close to a random
+    walk, and the true drift is uncertain — so we apply only a small outlook lean
+    AND give each simulated path its own drift drawn from a distribution. This
+    stops the old model from reporting impossible odds (e.g. 97% at 3:1) by
+    properly widening the outcome cone."""
     c = np.array([x["c"] for x in candles], dtype=float)
     logret = np.diff(np.log(c[c > 0]))
     tail = logret[-120:] if len(logret) >= 120 else logret
     sigma = float(np.std(tail)) or 1e-4
     mu_hist = float(np.mean(tail))
-    # directional lean from the outlook score (-100..100)
-    tilt = sigma * (score / 100.0) * 0.6
-    mu = mu_hist * 0.3 + tilt
+    # small, honest directional lean (was 0.6 — wildly overconfident)
+    tilt = sigma * (score / 100.0) * 0.12
+    mu_center = mu_hist * 0.15 + tilt
 
     n = rc.SIM_PATHS
     horizon = horizon or rc.SIM_HORIZON_BARS
@@ -222,8 +231,10 @@ def _predict(candles: list, side: str, entry: float, sl: float, tp: float,
     outcome = np.zeros(n, dtype=float)  # in price terms, + = profit
     resolved_step = np.full(n, horizon, dtype=float)  # bars until TP/SL (horizon if never)
     rng = np.random.default_rng()
+    # drift UNCERTAINTY: each path gets its own drift around the (small) center
+    mu_path = rng.normal(mu_center, sigma * 0.5, n)
     for i in range(1, horizon + 1):
-        shocks = rng.normal(mu, sigma, n)
+        shocks = rng.normal(mu_path, sigma)  # per-path mean, shape (n,)
         prices = np.where(active, prices * np.exp(shocks), prices)
         if side == "BUY":
             tp_hit = active & (prices >= tp)
@@ -309,6 +320,48 @@ def _min_stop_dist(spec: dict) -> float:
     return stops * pt
 
 
+def _adx_value(candles: list) -> float:
+    """Current ADX (trend strength). Used as a chop filter."""
+    try:
+        df = pd.DataFrame(candles)
+        a, _, _ = ind.adx(df["h"], df["l"], df["c"], 14)
+        v = float(a.iloc[-1])
+        return v if v == v else 0.0  # nan guard
+    except Exception:  # noqa
+        return 0.0
+
+
+async def _htf_bias(signal_symbol: str, timeframe: str):
+    """Higher-timeframe directional bias for multi-timeframe confluence."""
+    htf = _HTF.get(timeframe, timeframe)
+    if htf == timeframe:
+        return None
+    try:
+        hc = await md.get_candles(signal_symbol, htf, 200)
+        if hc and len(hc) >= 60:
+            return compute_outlook(hc, signal_symbol, htf).get("direction")
+    except Exception:  # noqa
+        pass
+    return None
+
+
+async def _realized_profit(position_id: str):
+    """Net realized P&L for a closed position from its deals (for learning)."""
+    try:
+        deals = await mt5_trader.deals_range(_day_start() - timedelta(days=4), _now())
+        if isinstance(deals, dict):
+            deals = deals.get("deals", []) or []
+        tot, found = 0.0, False
+        for dd in deals or []:
+            if str(dd.get("positionId")) == str(position_id):
+                tot += (float(dd.get("profit", 0) or 0) + float(dd.get("commission", 0) or 0)
+                        + float(dd.get("swap", 0) or 0))
+                found = True
+        return round(tot, 2) if found else None
+    except Exception:  # noqa
+        return None
+
+
 # Reward:risk targets the simulation chooses between. Letting winners run (higher
 # R) is how the balance compounds toward the 2x goal — but only when the forward
 # simulation says the higher target still carries positive expected value.
@@ -373,7 +426,28 @@ async def _analyze(signal_symbol: str, timeframe: str, horizon: int) -> dict:
         return {"ok": False, "mt5_symbol": mt5_sym, "direction": direction, "confidence": int(conf),
                 "reason": f"Confidence {int(conf)}% (need {rc.MIN_CONFIDENCE}%+). Holding off."}
 
+    # regime / chop filter: trend-following setups need a real trend (ADX)
+    adx_v = _adx_value(candles)
+    if adx_v < ADX_MIN:
+        return {"ok": False, "mt5_symbol": mt5_sym, "direction": direction, "confidence": int(conf),
+                "reason": f"Weak/choppy trend (ADX {adx_v:.0f} < {int(ADX_MIN)}) — skipping."}
+    regime = detect_regime(candles)
+
     side = "BUY" if direction == "Up" else "SELL"
+
+    # multi-timeframe confluence: never trade against the higher timeframe
+    htf_dir = await _htf_bias(signal_symbol, timeframe)
+    if (side == "BUY" and htf_dir == "Down") or (side == "SELL" and htf_dir == "Up"):
+        return {"ok": False, "mt5_symbol": mt5_sym, "direction": direction, "side": side,
+                "confidence": int(conf),
+                "reason": f"Higher timeframe is {htf_dir} — no multi-timeframe agreement, skipping."}
+
+    # learned edge: stop repeating a setup that's been losing money
+    blk = await learning.edge_block(mt5_sym, side)
+    if blk:
+        return {"ok": False, "mt5_symbol": mt5_sym, "direction": direction, "side": side,
+                "confidence": int(conf), "reason": blk}
+
     live = await md.get_live(signal_symbol, timeframe)
     price = float(live.get("price") or candles[-1]["c"])
     atr = _atr(candles) or price * 0.004
@@ -389,26 +463,35 @@ async def _analyze(signal_symbol: str, timeframe: str, horizon: int) -> dict:
         sl, tp = round(price + sl_dist, d), round(price - tp_dist, d)
 
     pred = opt["pred"]
+    # CALIBRATE the sim's odds against what this setup actually achieves live
+    cal_win = await learning.calibrate_winprob(pred["win_prob"], mt5_sym, side)
+    cal_ev = round(cal_win * rr - (1 - cal_win) * 1.0, 3)  # expectancy in R
+    es = await learning.stats(mt5_sym, side)
     tf_min = _tf_minutes(timeframe)
     hold_min = pred["est_hold_bars"] * tf_min
     hold_label = _humanize_mins(hold_min)
     window_label = _humanize_mins(pred["horizon_bars"] * tf_min)
     base = {"mt5_symbol": mt5_sym, "signal_symbol": signal_symbol, "timeframe": timeframe,
             "direction": direction, "side": side, "confidence": int(conf),
-            "win_prob": pred["win_prob"], "expected_r": pred["expected_r"], "rr": rr,
+            "win_prob": cal_win, "expected_r": cal_ev, "sim_win_prob": pred["win_prob"], "rr": rr,
+            "adx": round(adx_v, 0), "htf_dir": htf_dir, "regime": regime.get("trend"),
+            "edge_n": es.get("n"), "edge_expectancy": es.get("expectancy_r"),
             "horizon_bars": pred["horizon_bars"], "est_hold_min": int(round(hold_min)),
             "hold_label": hold_label, "window_label": window_label,
             "price": round(price, d), "stop_loss": sl, "take_profit": tp, "sl_dist": sl_dist,
             "vol": float((ol.get("metrics") or {}).get("volatility_pct") or 0),
             "reasons": ol.get("reasons", [])[:3]}
-    if pred["win_prob"] < rc.MIN_WIN_PROB or pred["expected_r"] < rc.MIN_EXPECTED_R:
+    breakeven = 1.0 / (1.0 + rr)
+    win_floor = max(0.33, breakeven + 0.02)  # must clear breakeven with margin
+    if cal_win < win_floor or cal_ev < rc.MIN_EXPECTED_R:
         base["ok"] = False
-        base["reason"] = (f"Sim {int(pred['win_prob']*100)}% win odds at {rr:.1f}:1, "
-                          f"{pred['expected_r']:+.2f}R within {window_label} — not worth it. Waiting.")
+        base["reason"] = (f"Calibrated {int(cal_win*100)}% win odds at {rr:.1f}:1 → {cal_ev:+.2f}R "
+                          f"expectancy — not a positive edge yet. Waiting.")
         return base
     base["ok"] = True
-    base["reason"] = (f"Tradeable: {int(pred['win_prob']*100)}% win odds, {pred['expected_r']:+.2f}R "
-                      f"at {rr:.1f}:1 reward:risk, hold {hold_label}.")
+    edge_note = (f" · learned {es['n']} trades {es['expectancy_r']:+.2f}R" if es.get("n") else "")
+    base["reason"] = (f"Tradeable: {int(cal_win*100)}% calibrated win odds, {cal_ev:+.2f}R expectancy "
+                      f"at {rr:.1f}:1, ADX {adx_v:.0f}, hold {hold_label}{edge_note}.")
     return base
 
 
@@ -498,6 +581,9 @@ async def propose(signal_symbol: str, timeframe: str = None) -> dict:
         "take_profit": tp,
         "confidence": a["confidence"],
         "volatility_pct": round(a["vol"], 2),
+        "regime": a.get("regime"),
+        "adx": a.get("adx"),
+        "htf_dir": a.get("htf_dir"),
         "win_prob": a["win_prob"],
         "expected_r": a["expected_r"],
         "rr": rr,
@@ -726,6 +812,10 @@ async def approve(proposal_id: str) -> dict:
         "position_id": position_id,
         "client_id": client_id,
         "status": "open",
+        "rr": p.get("rr"),
+        "confidence": p.get("confidence"),
+        "regime": p.get("regime"),
+        "planned_risk": p.get("est_risk_usd"),
         "result_code": str(result.get("stringCode") or result.get("numericCode") or "ok"),
     })
     p2 = await db.trade_proposals.find_one({"id": proposal_id}, {"_id": 0})
@@ -816,9 +906,18 @@ async def open_positions() -> list:
         pid = t.get("position_id")
         p = live_map.get(pid) if live_map is not None else None
         if live_map is not None and p is None:
-            # MT5 is reachable and says this position is gone -> mark closed.
+            # MT5 is reachable and says this position is gone -> learn + mark closed.
+            profit = await _realized_profit(pid)
             await db.trades.update_one(
-                {"position_id": pid}, {"$set": {"status": "closed", "closed_at": _now().isoformat()}})
+                {"position_id": pid},
+                {"$set": {"status": "closed", "closed_at": _now().isoformat(),
+                          "realized_profit": profit}})
+            try:
+                await learning.record_outcome(
+                    t, profit if profit is not None else t.get("last_profit", 0),
+                    t.get("planned_risk"))
+            except Exception as e:  # noqa
+                logger.warning(f"record_outcome failed: {e}")
             continue
         if p:
             profit = round(float(p.get("unrealizedProfit", p.get("profit", 0)) or 0), 2)
@@ -864,6 +963,21 @@ async def _position_gone(position_id: str, tries: int = 3) -> bool:
     return False
 
 
+async def _learn_close(position_id: str):
+    """Record the realized R-multiple of a just-closed trade for the learner."""
+    try:
+        t = await db.trades.find_one({"position_id": position_id}, {"_id": 0})
+        if not t:
+            return
+        profit = await _realized_profit(position_id)
+        await db.trades.update_one({"position_id": position_id},
+                                   {"$set": {"realized_profit": profit}})
+        await learning.record_outcome(
+            t, profit if profit is not None else t.get("last_profit", 0), t.get("planned_risk"))
+    except Exception as e:  # noqa
+        logger.warning(f"_learn_close failed: {e}")
+
+
 async def close(position_id: str) -> dict:
     try:
         result = await mt5_trader.close_position(position_id)
@@ -874,7 +988,14 @@ async def close(position_id: str) -> dict:
             await db.trades.update_one(
                 {"position_id": position_id},
                 {"$set": {"status": "closed", "closed_at": _now().isoformat()}})
+            await _learn_close(position_id)
             return {"ok": True, "result": {"note": "Position closed (confirmed with broker)."}}
         return {"ok": False, "error": str(e)}
     await db.trades.update_one({"position_id": position_id}, {"$set": {"status": "closed", "closed_at": _now().isoformat()}})
+    await _learn_close(position_id)
     return {"ok": True, "result": _safe(result)}
+
+
+async def edge_report() -> dict:
+    """Learned-edge summary (realized expectancy per setup) for the UI."""
+    return await learning.edge_report()

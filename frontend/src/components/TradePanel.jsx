@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   ShieldCheck, ShieldAlert, Check, X, TrendingUp, TrendingDown,
-  Loader2, Gauge, ScrollText, CircleDollarSign, Target,
+  Loader2, Gauge, ScrollText, CircleDollarSign, Target, Brain,
 } from "lucide-react";
 import { api, fmtUsd, fmtNum, pnlColor, fmtTime, formatApiErrorDetail } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -39,6 +39,11 @@ export function TradePanel() {
     queryFn: async () => (await api.get("/trades/scan-status")).data,
     refetchInterval: 20000,
   });
+  const { data: edge } = useQuery({
+    queryKey: ["trade-edge"],
+    queryFn: async () => (await api.get("/trades/edge")).data,
+    refetchInterval: 30000,
+  });
   const { data: pnl } = useQuery({
     queryKey: ["trade-pnl"],
     queryFn: async () => (await api.get("/trades/pnl")).data,
@@ -61,7 +66,7 @@ export function TradePanel() {
   });
 
   const refresh = () =>
-    ["trade-account", "trade-pnl", "trade-proposals", "trade-positions", "trade-log", "trade-scan-status"].forEach((k) =>
+    ["trade-account", "trade-pnl", "trade-proposals", "trade-positions", "trade-log", "trade-scan-status", "trade-edge"].forEach((k) =>
       qc.invalidateQueries({ queryKey: [k] })
     );
 
@@ -187,6 +192,37 @@ export function TradePanel() {
             </div>
           )}
         </div>
+
+        {/* adaptive learned edge */}
+        {edge?.overall?.n > 0 && (
+          <div className="border border-border/40 bg-background rounded-sm p-3" data-testid="learned-edge">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[10px] font-mono uppercase tracking-[0.1em] text-muted-foreground flex items-center gap-1.5">
+                <Brain className="h-3.5 w-3.5" /> Learned edge · last {edge.overall.n} trades
+              </span>
+              <span className={`num text-sm ${pnlColor(edge.overall.expectancy_r)}`}>
+                {edge.overall.expectancy_r >= 0 ? "+" : ""}{edge.overall.expectancy_r}R / trade
+              </span>
+            </div>
+            <div className="text-[10px] font-mono text-muted-foreground mb-1.5">
+              {Math.round((edge.overall.win_rate || 0) * 100)}% win · net {edge.overall.total_r >= 0 ? "+" : ""}{edge.overall.total_r}R.
+              The bot calibrates each setup's odds to these real results and skips ones that keep losing.
+            </div>
+            {edge.setups?.length > 0 && (
+              <div className="divide-y divide-border/30 border-t border-border/30">
+                {edge.setups.slice(0, 4).map((s) => (
+                  <div key={s.setup} className="flex items-center justify-between py-1 text-[11px] font-mono" data-testid={`edge-${s.setup}`}>
+                    <span className={s.setup.startsWith("BUY") ? "text-buy" : "text-sell"}>{s.setup}</span>
+                    <span className="text-muted-foreground">
+                      {s.n}× · {Math.round((s.win_rate || 0) * 100)}% ·
+                      <span className={pnlColor(s.expectancy_r)}> {s.expectancy_r >= 0 ? "+" : ""}{s.expectancy_r}R</span>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* propose */}
         <div>

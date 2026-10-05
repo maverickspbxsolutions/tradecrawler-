@@ -51,6 +51,11 @@ async def trades_scan_status():
     return await trade_engine.scan_status()
 
 
+@api.get("/trades/edge")
+async def trades_edge():
+    return await trade_engine.edge_report()
+
+
 @api.get("/trades/pnl")
 async def trades_pnl():
     return await trade_engine.daily_pnl()
