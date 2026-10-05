@@ -12,6 +12,7 @@ Hard safety rails (see risk_config.py):
   - idempotent placement (one order per approved proposal)
 """
 import uuid
+import asyncio
 import logging
 from datetime import datetime, timezone, timedelta
 
@@ -754,10 +755,32 @@ async def trade_log(limit: int = 50) -> list:
     return await db.trades.find({}, {"_id": 0}).sort("placed_at", -1).to_list(limit)
 
 
+async def _position_gone(position_id: str, tries: int = 3) -> bool:
+    """Poll the broker to confirm a position is actually closed. MetaApi can
+    return a transient 'account not connected' error during a reconnect even
+    though the close already went through on the broker's side."""
+    for _ in range(tries):
+        try:
+            ids = {str(p.get("id")) for p in (await mt5_trader.positions() or [])}
+            if position_id not in ids:
+                return True
+        except Exception:  # noqa
+            pass
+        await asyncio.sleep(1)
+    return False
+
+
 async def close(position_id: str) -> dict:
     try:
         result = await mt5_trader.close_position(position_id)
     except Exception as e:  # noqa
+        # The broker may have closed it anyway during a reconnect — verify before
+        # surfacing a scary "Close failed" to the user.
+        if await _position_gone(position_id):
+            await db.trades.update_one(
+                {"position_id": position_id},
+                {"$set": {"status": "closed", "closed_at": _now().isoformat()}})
+            return {"ok": True, "result": {"note": "Position closed (confirmed with broker)."}}
         return {"ok": False, "error": str(e)}
     await db.trades.update_one({"position_id": position_id}, {"$set": {"status": "closed", "closed_at": _now().isoformat()}})
     return {"ok": True, "result": _safe(result)}

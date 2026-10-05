@@ -240,11 +240,11 @@ async def get_live(symbol: str, timeframe: str):
             logger.warning(f"MT5 live failed {symbol}->{msym}: {e}")
             mt5_trader.ensure_bg()
             if cached:
-                return cached[1]  # serve last known price during a transient drop
+                return {**cached[1], "server_ts": int(now * 1000)}  # last known price, fresh ts
     elif msym:
         mt5_trader.ensure_bg()
         if cached:
-            return cached[1]
+            return {**cached[1], "server_ts": int(now * 1000)}
 
     out = {"symbol": symbol, "timeframe": timeframe, "price": None, "candle": None,
            "source": None, "available": False,

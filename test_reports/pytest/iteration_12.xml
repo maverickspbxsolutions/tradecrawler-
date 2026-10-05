@@ -1,0 +1,179 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="4" skipped="0" tests="8" time="178.297" timestamp="2026-10-05T04:19:34.280128+00:00" hostname="agent-env-f6d3fc6b-2d9b-4f74-b214-fea6e2ab88b8"><testcase classname="tests.test_mt5_warmcache_and_trades" name="test_candles_mt5_warm[XAUUSD]" time="26.860" /><testcase classname="tests.test_mt5_warmcache_and_trades" name="test_candles_mt5_warm[BTCUSD]" time="0.129" /><testcase classname="tests.test_mt5_warmcache_and_trades" name="test_candles_mt5_warm[Volatility 100 Index]" time="0.136" /><testcase classname="tests.test_mt5_warmcache_and_trades" name="test_live_btcusd_mt5" time="0.063"><failure message="AssertionError: assert False is True&#10; +  where False = &lt;built-in method get of dict object at 0xfaac620d9240&gt;('available')&#10; +    where &lt;built-in method get of dict object at 0xfaac620d9240&gt; = {'symbol': 'BTCUSD', 'timeframe': '15m', 'price': None, 'candle': None, ...}.get">backend/tests/test_mt5_warmcache_and_trades.py:62: in test_live_btcusd_mt5
+    assert d1.get("available") is True
+E   AssertionError: assert False is True
+E    +  where False = &lt;built-in method get of dict object at 0xfaac620d9240&gt;('available')
+E    +    where &lt;built-in method get of dict object at 0xfaac620d9240&gt; = {'symbol': 'BTCUSD', 'timeframe': '15m', 'price': None, 'candle': None, ...}.get</failure></testcase><testcase classname="tests.test_mt5_warmcache_and_trades" name="test_symbols_mt5_only" time="30.004"><failure message="requests.exceptions.ReadTimeout: HTTPSConnectionPool(host='signal-engine-158.preview.emergentagent.com', port=443): Read timed out. (read timeout=30)">/root/.venv/lib/python3.11/site-packages/urllib3/connectionpool.py:540: in _make_request
+    response = conn.getresponse()
+               ^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/urllib3/connection.py:638: in getresponse
+    httplib_response = super().getresponse()
+                       ^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/http/client.py:1443: in getresponse
+    response.begin()
+/usr/local/lib/python3.11/http/client.py:337: in begin
+    version, status, reason = self._read_status()
+                              ^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/http/client.py:298: in _read_status
+    line = str(self.fp.readline(_MAXLINE + 1), "iso-8859-1")
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/socket.py:718: in readinto
+    return self._sock.recv_into(b)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/ssl.py:1314: in recv_into
+    return self.read(nbytes, buffer)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/ssl.py:1166: in read
+    return self._sslobj.read(len, buffer)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   TimeoutError: The read operation timed out
+
+The above exception was the direct cause of the following exception:
+/root/.venv/lib/python3.11/site-packages/requests/adapters.py:696: in send
+    resp = conn.urlopen(
+/root/.venv/lib/python3.11/site-packages/urllib3/connectionpool.py:847: in urlopen
+    retries = retries.increment(
+/root/.venv/lib/python3.11/site-packages/urllib3/util/retry.py:510: in increment
+    raise reraise(type(error), error, _stacktrace)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/urllib3/util/util.py:39: in reraise
+    raise value
+/root/.venv/lib/python3.11/site-packages/urllib3/connectionpool.py:793: in urlopen
+    response = self._make_request(
+/root/.venv/lib/python3.11/site-packages/urllib3/connectionpool.py:542: in _make_request
+    self._raise_timeout(err=e, url=url, timeout_value=read_timeout)
+/root/.venv/lib/python3.11/site-packages/urllib3/connectionpool.py:373: in _raise_timeout
+    raise ReadTimeoutError(
+E   urllib3.exceptions.ReadTimeoutError: HTTPSConnectionPool(host='signal-engine-158.preview.emergentagent.com', port=443): Read timed out. (read timeout=30)
+
+During handling of the above exception, another exception occurred:
+backend/tests/test_mt5_warmcache_and_trades.py:75: in test_symbols_mt5_only
+    r = client.get(f"{API}/market/symbols", timeout=30)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/sessions.py:671: in get
+    return self.request("GET", url, params=params, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/sessions.py:651: in request
+    resp = self.send(prep, **send_kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/sessions.py:784: in send
+    r = adapter.send(request, **kwargs)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/adapters.py:742: in send
+    raise ReadTimeout(e, request=request)
+E   requests.exceptions.ReadTimeout: HTTPSConnectionPool(host='signal-engine-158.preview.emergentagent.com', port=443): Read timed out. (read timeout=30)</failure></testcase><testcase classname="tests.test_mt5_warmcache_and_trades" name="test_risk_config" time="0.243" /><testcase classname="tests.test_mt5_warmcache_and_trades" name="test_confidence_scaled_lot_sizing" time="60.055"><failure message="requests.exceptions.ReadTimeout: HTTPSConnectionPool(host='signal-engine-158.preview.emergentagent.com', port=443): Read timed out. (read timeout=60)">/root/.venv/lib/python3.11/site-packages/urllib3/connectionpool.py:540: in _make_request
+    response = conn.getresponse()
+               ^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/urllib3/connection.py:638: in getresponse
+    httplib_response = super().getresponse()
+                       ^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/http/client.py:1443: in getresponse
+    response.begin()
+/usr/local/lib/python3.11/http/client.py:337: in begin
+    version, status, reason = self._read_status()
+                              ^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/http/client.py:298: in _read_status
+    line = str(self.fp.readline(_MAXLINE + 1), "iso-8859-1")
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/socket.py:718: in readinto
+    return self._sock.recv_into(b)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/ssl.py:1314: in recv_into
+    return self.read(nbytes, buffer)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/ssl.py:1166: in read
+    return self._sslobj.read(len, buffer)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   TimeoutError: The read operation timed out
+
+The above exception was the direct cause of the following exception:
+/root/.venv/lib/python3.11/site-packages/requests/adapters.py:696: in send
+    resp = conn.urlopen(
+/root/.venv/lib/python3.11/site-packages/urllib3/connectionpool.py:847: in urlopen
+    retries = retries.increment(
+/root/.venv/lib/python3.11/site-packages/urllib3/util/retry.py:510: in increment
+    raise reraise(type(error), error, _stacktrace)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/urllib3/util/util.py:39: in reraise
+    raise value
+/root/.venv/lib/python3.11/site-packages/urllib3/connectionpool.py:793: in urlopen
+    response = self._make_request(
+/root/.venv/lib/python3.11/site-packages/urllib3/connectionpool.py:542: in _make_request
+    self._raise_timeout(err=e, url=url, timeout_value=read_timeout)
+/root/.venv/lib/python3.11/site-packages/urllib3/connectionpool.py:373: in _raise_timeout
+    raise ReadTimeoutError(
+E   urllib3.exceptions.ReadTimeoutError: HTTPSConnectionPool(host='signal-engine-158.preview.emergentagent.com', port=443): Read timed out. (read timeout=60)
+
+During handling of the above exception, another exception occurred:
+backend/tests/test_mt5_warmcache_and_trades.py:104: in test_confidence_scaled_lot_sizing
+    r = client.post(f"{API}/trades/propose", json={"symbol": sym, "timeframe": "15m"}, timeout=60)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/sessions.py:712: in post
+    return self.request("POST", url, data=data, json=json, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/sessions.py:651: in request
+    resp = self.send(prep, **send_kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/sessions.py:784: in send
+    r = adapter.send(request, **kwargs)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/adapters.py:742: in send
+    raise ReadTimeout(e, request=request)
+E   requests.exceptions.ReadTimeout: HTTPSConnectionPool(host='signal-engine-158.preview.emergentagent.com', port=443): Read timed out. (read timeout=60)</failure></testcase><testcase classname="tests.test_mt5_warmcache_and_trades" name="test_lifecycle_volatility_persistence" time="60.190"><failure message="requests.exceptions.ReadTimeout: HTTPSConnectionPool(host='signal-engine-158.preview.emergentagent.com', port=443): Read timed out. (read timeout=60)">/root/.venv/lib/python3.11/site-packages/urllib3/connectionpool.py:540: in _make_request
+    response = conn.getresponse()
+               ^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/urllib3/connection.py:638: in getresponse
+    httplib_response = super().getresponse()
+                       ^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/http/client.py:1443: in getresponse
+    response.begin()
+/usr/local/lib/python3.11/http/client.py:337: in begin
+    version, status, reason = self._read_status()
+                              ^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/http/client.py:298: in _read_status
+    line = str(self.fp.readline(_MAXLINE + 1), "iso-8859-1")
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/socket.py:718: in readinto
+    return self._sock.recv_into(b)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/ssl.py:1314: in recv_into
+    return self.read(nbytes, buffer)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.11/ssl.py:1166: in read
+    return self._sslobj.read(len, buffer)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   TimeoutError: The read operation timed out
+
+The above exception was the direct cause of the following exception:
+/root/.venv/lib/python3.11/site-packages/requests/adapters.py:696: in send
+    resp = conn.urlopen(
+/root/.venv/lib/python3.11/site-packages/urllib3/connectionpool.py:847: in urlopen
+    retries = retries.increment(
+/root/.venv/lib/python3.11/site-packages/urllib3/util/retry.py:510: in increment
+    raise reraise(type(error), error, _stacktrace)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/urllib3/util/util.py:39: in reraise
+    raise value
+/root/.venv/lib/python3.11/site-packages/urllib3/connectionpool.py:793: in urlopen
+    response = self._make_request(
+/root/.venv/lib/python3.11/site-packages/urllib3/connectionpool.py:542: in _make_request
+    self._raise_timeout(err=e, url=url, timeout_value=read_timeout)
+/root/.venv/lib/python3.11/site-packages/urllib3/connectionpool.py:373: in _raise_timeout
+    raise ReadTimeoutError(
+E   urllib3.exceptions.ReadTimeoutError: HTTPSConnectionPool(host='signal-engine-158.preview.emergentagent.com', port=443): Read timed out. (read timeout=60)
+
+During handling of the above exception, another exception occurred:
+backend/tests/test_mt5_warmcache_and_trades.py:120: in test_lifecycle_volatility_persistence
+    r = client.post(f"{API}/trades/propose", json={"symbol": sym, "timeframe": "15m"}, timeout=60)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/sessions.py:712: in post
+    return self.request("POST", url, data=data, json=json, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/sessions.py:651: in request
+    resp = self.send(prep, **send_kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/sessions.py:784: in send
+    r = adapter.send(request, **kwargs)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/requests/adapters.py:742: in send
+    raise ReadTimeout(e, request=request)
+E   requests.exceptions.ReadTimeout: HTTPSConnectionPool(host='signal-engine-158.preview.emergentagent.com', port=443): Read timed out. (read timeout=60)</failure></testcase></testsuite></testsuites>
