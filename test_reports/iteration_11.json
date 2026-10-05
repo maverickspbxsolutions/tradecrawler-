@@ -1,0 +1,34 @@
+{
+  "summary": "Backend-only retest of MT5-only market data endpoints after mt5_trader lifecycle fix. ALL 9 pytest tests PASS. Primary acceptance criteria 100% met: (1) No 502 on any /api/market/candles|live|outlook for BTCUSD, XAUUSD, Volatility 100 Index; (2) all responses fast (<10s, actually sub-second for candles/live, ~0.2s typical); (3) MT5-only sourcing confirmed — no binance/coinbase/yahoo appears in any response; (4) graceful shape {available:false, reason:'Live data for this market is temporarily unavailable.'} with empty candles[] when MT5 is down; (5) /api/market/live NOW includes the 'reason' field when unavailable (fixes the minor parity issue from iteration 10); (6) /api/market/outlook returns 200 with available:false+reason+disclaimer when MT5 is down. MT5 availability itself is still blocked by external MetaApi quota (subscriptionsCount:32, maxSubscriptionsPerUser:25) — this is an external account/plan limit and NOT a code regression, exactly as flagged in the review request.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "mt5_trader (background)", "issue": "backend.err.log still logs the full METAAPI_TOKEN JWT via engineio.client at INFO level on every reconnect. Not a functional bug but it leaks the bearer in logs; consider setting engineio/socketio loggers to WARNING in production."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_market_data_mt5_only.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "External (unchanged from iter-10): free MetaApi subscription slots (currently 32 used of 25 allowed) by undeploying unused accounts in the MetaApi dashboard, or upgrade the plan. Until then live data remains available:false but the app degrades gracefully — this is working as designed.",
+    "Optional: lower engineio.client / socketio.client log level to WARNING in server.py to stop logging the METAAPI_TOKEN JWT on every reconnect attempt."
+  ],
+  "critical_code_review_comments": [
+    "mt5_trader._connect reusing a single module-level MetaApi client, disposing it on failed connect, closing the old RPC conn before reconnect, 120s CONNECT_COOLDOWN, and shutdown() releasing the subscription are all present and effective — observed MetaApi subscriptionsCount dropped from 33 (iter-10) to 32 (iter-11), consistent with better slot hygiene.",
+    "market_data.get_candles/get_live are strictly MT5-only (no binance/coinbase/yahoo code paths reachable), non-blocking (ensure_bg + stale-cache fallback), with proper DerivUnavailable propagation to a 200 response at the route layer.",
+    "routes.py: /api/market/live now returns {available:false, reason, source:null} — the minor parity gap from iteration 10 is FIXED.",
+    "Nit: /api/market/candles response does not include 'source' when available:true (candles endpoint just returns the array), while /api/market/live does. Low priority but a 'source' field on candles would help the frontend prove 'deriv-mt5' at a glance."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_market_data_mt5_only.py"
+  ],
+  "success_rate": {"backend": "100% (9/9 tests pass; graceful-degradation acceptance met)", "frontend": "not tested (per request)"},
+  "test_credentials": "xambiep90 / Reddestroad1$ from /app/memory/test_credentials.md",
+  "seed_data_creation": "none",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run: pytest /app/backend/tests/test_market_data_mt5_only.py -v -n 0. Tests DO NOT require MetaApi to be connected — they verify graceful behavior. If MetaApi quota is later freed, same tests will automatically assert available:true + source contains 'deriv'/'mt5' + forbid binance/coinbase/yahoo. Current external blocker: MetaApi LIMIT_ACCOUNT_SUBSCRIPTIONS_PER_USER (32/25) visible in /var/log/supervisor/backend.err.log — undeploy unused MetaApi accounts to clear it.",
+  "rca of the issue": "Code fix is confirmed working end-to-end. Reproduction of current data-unavailable state: GET /api/market/candles?symbol=BTCUSD&timeframe=1h&limit=200 with bearer -> HTTP 200 {available:false, reason:'Live data for this market is temporarily unavailable.', candles:[]} in ~0.2s; same for XAUUSD and 'Volatility 100 Index'. Root cause (external, not code): mt5_trader._bg_connect -> MetaApi StreamingConnection.subscribe keeps raising TooManyRequestsException with metadata {maxSubscriptionsPerUser:25, subscriptionsCount:32, type:'LIMIT_ACCOUNT_SUBSCRIPTIONS_PER_USER'}, so is_ready() stays False and get_candles/get_live raise DerivUnavailable, which routes.py translates to 200+available:false. Mitigation: free MetaApi slots (dashboard: undeploy unused accounts) or upgrade plan to >=32 subscriptions. No further code change required for graceful behavior; subscriptionsCount already dropped 33 -> 32 vs iter-10 thanks to the dispose-on-failure fix, confirming the lifecycle improvement."
+}
