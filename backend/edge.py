@@ -10,11 +10,13 @@ import pandas as pd
 
 import indicators as ind
 
-MIN_SCORE = 62          # composite confluence score required to trade
+MIN_SCORE = 60          # composite confluence score required to trade
 ADX_TREND = 25.0        # strong trend (momentum regime)
-ADX_CHOP = 18.0         # below this with reverting structure = mean-reversion
-VR_PERSIST = 1.08       # variance ratio > this => trending/persistent
+ADX_CHOP = 18.0         # (legacy) kept for reference
+VR_PERSIST = 1.05       # variance ratio > this => trending/persistent
 VR_REVERT = 0.92        # variance ratio < this => mean-reverting
+RSI_FADE_LO = 33.0      # fade long when RSI <= this in a reversion regime
+RSI_FADE_HI = 67.0      # fade short when RSI >= this in a reversion regime
 
 
 def _variance_ratio(logret: np.ndarray, k: int = 5) -> float:
@@ -85,9 +87,12 @@ def assess(candles: list, htf_dir: str | None = None) -> dict:
         vol_ratio = float(vol.iloc[-3:].mean()) / float(vol.iloc[-20:].mean())
 
     # ---- regime ----
-    if adx >= ADX_TREND and vr >= VR_PERSIST:
+    # momentum = strong trend + persistent (or a very strong trend even if VR is
+    # neutral); reversion = anti-persistent and not strongly trending (no
+    # dead-zone in the ADX 18-25 band); otherwise chop.
+    if (adx >= ADX_TREND and vr >= VR_PERSIST) or (adx >= 35 and vr >= 0.98):
         regime = "momentum"
-    elif adx <= ADX_CHOP and vr <= VR_REVERT:
+    elif vr <= VR_REVERT and adx < ADX_TREND:
         regime = "reversion"
     else:
         return {"tradeable": False, "regime": "chop", "adx": round(adx),
@@ -117,13 +122,13 @@ def assess(candles: list, htf_dir: str | None = None) -> dict:
         if (up and float(pdi.iloc[-1]) > float(ndi.iloc[-1])) or (not up and float(ndi.iloc[-1]) > float(pdi.iloc[-1])):
             score += 10; reasons.append("Directional index (+DI/-DI) confirms.")
     else:  # reversion — fade the stretched extreme back toward the mean
-        if r <= 30:
+        if r <= RSI_FADE_LO:
             direction = "Up"
-        elif r >= 70:
+        elif r >= RSI_FADE_HI:
             direction = "Down"
         else:
             return {"tradeable": False, "regime": regime, "adx": round(adx),
-                    "reason": f"Mean-reversion regime but RSI {r:.0f} isn't stretched — no fade setup."}
+                    "reason": f"Mean-reversion regime but RSI {r:.0f} isn't stretched enough — no fade setup."}
         up = direction == "Up"
         score += 25; reasons.append(f"Mean-reversion regime (ADX {adx:.0f}, VR {vr:.2f}); fading RSI {r:.0f}.")
         div = _rsi_divergence(close, rsi)

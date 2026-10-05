@@ -304,3 +304,10 @@ User: "Allow the user to see the entire data for the assets from its inception. 
 - ASSET PROFILE + BACKTEST PRIOR (history.build_profile -> db.asset_profiles): from deep 1h (2500) + 1d (1500) history computes vol_pct, atr_pct, trend_frac (ADX>=25 base rate), vr_longrun, and a BACKTEST of the live regime/confluence rules over history -> hist win-rate & expectancy per side. Verified XAUUSD: 43 bt trades, win 0.488, exp +0.465R, trend_frac 0.514. Built lazily via get_profile (bg refresh, 24h ttl) + at startup for core symbols.
 - STRATEGY USE: learning.calibrate_winprob(pred,symbol,side,hist) now blends the historical backtest prior (hist_n>=20) before live realized stats. _analyze: floors SL to asset's long-run atr_pct, and SKIPS mean-reversion fades on assets that historically trend >=60% of the time (per-asset auto-tune). Proposals/scan expose score, vr, hist_win, hist_expectancy, asset_trend_frac.
 - NOT run through testing_agent this round (budget; markets were all chop/reversion so no tradeable proposal to exercise the prior live). Deep-history + chart + profiling verified via curl + screenshot. Vol100 deep-daily intermittently times out on MetaApi (flaky quota) — handled gracefully ("loading, try again"), caches once a fetch succeeds.
+
+## Regime dead-zone fix (2026-06)
+User reported bot too idle: "Unclear regime (ADX 23, VR 0.70) — no edge, standing aside." Root cause: edge.py reversion band required ADX<=18, so ADX 18-25 was a dead zone even when VR was decisively reverting. Fixes in edge.py:
+- Reversion now = VR<=0.92 AND ADX<25 (no ADX floor) -> ADX 23/VR 0.70 => reversion.
+- Momentum now = (ADX>=25 & VR>=1.05) OR (ADX>=35 & VR>=0.98) so very strong trends aren't dropped when VR is ~neutral. VR_PERSIST 1.08->1.05.
+- RSI fade trigger loosened 30/70 -> 33/67 (RSI_FADE_LO/HI). MIN_SCORE 62->60.
+Still gated by confluence score>=60 + positive calibrated expectancy, so no return to over-trading. Verified via scan-status: regimes now classify correctly; bot trades when RSI stretches / trend forms, waits in flat mid-RSI ranges (currently Gold RSI53, BTC chop, 100Index RSI44 -> idle, correct).
