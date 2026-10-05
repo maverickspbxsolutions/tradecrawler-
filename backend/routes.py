@@ -46,6 +46,18 @@ async def trades_active_symbols():
     return await trade_engine.active_instruments()
 
 
+@api.get("/market/history")
+async def market_history(symbol: str, range: str = "MAX"):
+    import history
+    return await history.get_history(symbol, range)
+
+
+@api.get("/market/profile")
+async def market_profile(symbol: str):
+    import history
+    return await history.get_profile(symbol)
+
+
 @api.get("/trades/scan-status")
 async def trades_scan_status():
     return await trade_engine.scan_status()

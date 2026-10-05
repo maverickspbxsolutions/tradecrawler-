@@ -4,7 +4,7 @@ import os
 import time
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from metaapi_cloud_sdk import MetaApi
 
@@ -287,6 +287,48 @@ async def candles(symbol: str, timeframe: str, limit: int = 300, closed_only: bo
     if closed_only and len(out) > 1:
         out = out[:-1]
     return out[-limit:]
+
+
+def _conv(rows) -> list:
+    out = []
+    for c in rows or []:
+        out.append({"t": _to_ms(c.get("time")), "o": float(c["open"]), "h": float(c["high"]),
+                    "l": float(c["low"]), "c": float(c["close"]),
+                    "v": float(c.get("tickVolume") or 0)})
+    out.sort(key=lambda x: x["t"])
+    return out
+
+
+async def candles_deep(symbol: str, timeframe: str, max_bars: int = 4000) -> list:
+    """Page Deriv MT5 history backward (1000/call) as deep as the broker keeps it.
+    Returns ascending candles, de-duplicated."""
+    await ensure()
+    acc = _state["account"]
+    collected: dict = {}
+    start = None  # None = most recent
+    oldest_seen = None
+    pages = max(1, min(12, max_bars // 900 + 1))
+    for _ in range(pages):
+        try:
+            rows = await _rpc(acc.get_historical_candles(symbol, timeframe, start, 1000), timeout=25)
+        except Exception as e:  # noqa
+            logger.warning(f"candles_deep page failed ({symbol} {timeframe}): {e}")
+            break  # keep whatever we already collected rather than failing entirely
+        batch = _conv(rows)
+        if not batch:
+            break
+        for c in batch:
+            collected[c["t"]] = c
+        oldest_t = batch[0]["t"]
+        if oldest_seen is not None and oldest_t >= oldest_seen:
+            break  # no further history available
+        oldest_seen = oldest_t
+        if len(collected) >= max_bars:
+            break
+        # next page: ask for candles strictly before the oldest we have
+        start = datetime.utcfromtimestamp(oldest_t / 1000) - timedelta(seconds=1)
+    out = sorted(collected.values(), key=lambda x: x["t"])
+    return out[-max_bars:]
 
 
 async def live_price(symbol: str):

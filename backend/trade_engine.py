@@ -27,6 +27,7 @@ from evolution import detect_regime
 import indicators as ind
 import learning
 import edge
+import history
 import market_data as md
 from alerts import get_settings
 
@@ -440,6 +441,15 @@ async def _analyze(signal_symbol: str, timeframe: str, horizon: int) -> dict:
     adx_v = ev["adx"]
     regime = {"trend": ev["regime"]}
 
+    # per-asset long-run profile (from deep history)
+    prof = await history.get_profile(mt5_sym, side)
+    # auto-tune per asset: don't fade a market that historically almost always trends
+    if ev["regime"] == "reversion" and (prof.get("trend_frac") or 0) >= 0.6:
+        return {"ok": False, "mt5_symbol": mt5_sym, "direction": direction, "side": side,
+                "confidence": int(conf), "regime": ev["regime"],
+                "reason": f"{mt5_sym} is a strong trender historically "
+                          f"({int(prof['trend_frac']*100)}% of the time) — not fading it."}
+
     # learned edge: stop repeating a setup that's been losing money
     blk = await learning.edge_block(mt5_sym, side)
     if blk:
@@ -448,7 +458,10 @@ async def _analyze(signal_symbol: str, timeframe: str, horizon: int) -> dict:
 
     live = await md.get_live(signal_symbol, timeframe)
     price = float(live.get("price") or candles[-1]["c"])
+    # floor the stop to the asset's own typical volatility (deep-history profile)
     atr = ev.get("atr") or _atr(candles) or price * 0.004
+    if prof.get("atr_pct"):
+        atr = max(atr, float(prof["atr_pct"]) * price * 0.8)
     d = _digits(price)
     # prediction-driven SL/TP: simulate several targets, keep the best-EV one
     opt = _optimize_levels(candles, side, price, atr, score, horizon)
@@ -461,8 +474,9 @@ async def _analyze(signal_symbol: str, timeframe: str, horizon: int) -> dict:
         sl, tp = round(price + sl_dist, d), round(price - tp_dist, d)
 
     pred = opt["pred"]
-    # CALIBRATE the sim's odds against what this setup actually achieves live
-    cal_win = await learning.calibrate_winprob(pred["win_prob"], mt5_sym, side)
+    # CALIBRATE the sim's odds against the asset's historical backtest AND live results
+    hist_prior = {"n": prof.get("hist_n"), "win": prof.get("hist_win")} if prof.get("hist_n") else None
+    cal_win = await learning.calibrate_winprob(pred["win_prob"], mt5_sym, side, hist_prior)
     cal_ev = round(cal_win * rr - (1 - cal_win) * 1.0, 3)  # expectancy in R
     es = await learning.stats(mt5_sym, side)
     tf_min = _tf_minutes(timeframe)
@@ -475,6 +489,8 @@ async def _analyze(signal_symbol: str, timeframe: str, horizon: int) -> dict:
             "adx": round(adx_v, 0), "htf_dir": htf_dir, "regime": regime.get("trend"),
             "score": ev.get("score"), "vr": ev.get("vr"),
             "edge_n": es.get("n"), "edge_expectancy": es.get("expectancy_r"),
+            "hist_win": prof.get("hist_win"), "hist_expectancy": prof.get("hist_expectancy"),
+            "hist_n": prof.get("hist_n"), "asset_trend_frac": prof.get("trend_frac"),
             "horizon_bars": pred["horizon_bars"], "est_hold_min": int(round(hold_min)),
             "hold_label": hold_label, "window_label": window_label,
             "price": round(price, d), "stop_loss": sl, "take_profit": tp, "sl_dist": sl_dist,

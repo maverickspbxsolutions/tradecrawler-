@@ -12,10 +12,20 @@ import {
 } from "@/components/ui/select";
 
 const TFS = ["1m", "5m", "15m", "1h", "4h", "1d"];
+const RANGES = ["LIVE", "1D", "1W", "1M", "1Y", "MAX"];
+
+function sinceLabel(ms) {
+  if (!ms) return "";
+  const d = new Date(ms);
+  return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
 
 export function PriceChart({ symbol, tf, onTfChange }) {
   const theme = useChartTheme();
   const [now, setNow] = useState(Date.now());
+  const [range, setRange] = useState("LIVE");
+  const isLive = range === "LIVE";
+
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
@@ -25,40 +35,67 @@ export function PriceChart({ symbol, tf, onTfChange }) {
     queryKey: ["candles", symbol, tf],
     queryFn: async () => (await api.get(`/market/candles?symbol=${symbol}&timeframe=${tf}&limit=120`)).data,
     refetchInterval: 15000,
-    enabled: !!symbol,
+    enabled: !!symbol && isLive,
   });
 
   const live = useQuery({
     queryKey: ["live", symbol, tf],
     queryFn: async () => (await api.get(`/market/live?symbol=${symbol}&timeframe=${tf}`)).data,
     refetchInterval: 3000,
-    enabled: !!symbol,
+    enabled: !!symbol && isLive,
     retry: 1,
   });
 
-  const closed = data?.candles || [];
-  const unavailable = data && data.available === false;
-  const liveCandle = live.data?.candle || null;
+  const history = useQuery({
+    queryKey: ["history", symbol, range],
+    queryFn: async () =>
+      (await api.get(`/market/history?symbol=${encodeURIComponent(symbol)}&range=${range}`)).data,
+    enabled: !!symbol && !isLive,
+    staleTime: 5 * 60 * 1000,
+    retry: 2,
+  });
 
-  let display = closed;
-  let hasLive = false;
-  if (closed.length && liveCandle) {
-    const lastT = closed[closed.length - 1].t;
-    if (liveCandle.t > lastT) {
-      display = [...closed, liveCandle];
-      hasLive = true;
-    } else if (liveCandle.t === lastT) {
-      display = [...closed.slice(0, -1), liveCandle];
-      hasLive = true;
+  // ---- assemble the series ----
+  let display, hasLive, unavailable, reason, histInfo;
+  if (isLive) {
+    const closed = data?.candles || [];
+    unavailable = data && data.available === false;
+    reason = data?.reason;
+    const liveCandle = live.data?.candle || null;
+    display = closed;
+    hasLive = false;
+    if (closed.length && liveCandle) {
+      const lastT = closed[closed.length - 1].t;
+      if (liveCandle.t > lastT) {
+        display = [...closed, liveCandle];
+        hasLive = true;
+      } else if (liveCandle.t === lastT) {
+        display = [...closed.slice(0, -1), liveCandle];
+        hasLive = true;
+      }
     }
+  } else {
+    display = history.data?.candles || [];
+    unavailable = history.data && history.data.available === false;
+    reason = history.data?.reason || "Deep history is loading from Deriv — try again in a moment.";
+    hasLive = false;
+    histInfo = history.data;
   }
 
-  const last = live.data?.price != null ? live.data.price : (display.length ? display[display.length - 1].c : null);
+  const last = isLive
+    ? live.data?.price != null
+      ? live.data.price
+      : display.length
+        ? display[display.length - 1].c
+        : null
+    : display.length
+      ? display[display.length - 1].c
+      : null;
   const first = display.length ? display[0].c : null;
   const changePct = last != null && first ? ((last - first) / first) * 100 : null;
   const up = changePct != null && changePct >= 0;
 
-  const liveOk = !unavailable && !live.isError && live.data?.price != null;
+  const liveOk = isLive && !unavailable && !live.isError && live.data?.price != null;
   const ageSec = live.dataUpdatedAt ? Math.max(0, Math.round((now - live.dataUpdatedAt) / 1000)) : null;
 
   return (
@@ -72,37 +109,75 @@ export function PriceChart({ symbol, tf, onTfChange }) {
           {changePct != null && (
             <span className={`num text-xs ${pnlColor(changePct)}`}>{fmtPct(changePct)}</span>
           )}
-          <span
-            className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-wider"
-            data-testid="live-indicator"
-            title={liveOk ? `Updated ${ageSec}s ago` : "Live feed delayed"}
-          >
+          {isLive ? (
             <span
-              className="inline-block h-1.5 w-1.5 rounded-full"
-              style={{ background: liveOk ? theme.buy : theme.muted, animation: liveOk ? "pulse 1.2s infinite" : "none" }}
-            />
-            <span style={{ color: liveOk ? theme.buy : theme.muted }}>
-              {liveOk ? `Live · ${ageSec ?? 0}s ago` : unavailable ? "Unavailable" : "Delayed"}
+              className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-wider"
+              data-testid="live-indicator"
+              title={liveOk ? `Updated ${ageSec}s ago` : "Live feed delayed"}
+            >
+              <span
+                className="inline-block h-1.5 w-1.5 rounded-full"
+                style={{ background: liveOk ? theme.buy : theme.muted, animation: liveOk ? "pulse 1.2s infinite" : "none" }}
+              />
+              <span style={{ color: liveOk ? theme.buy : theme.muted }}>
+                {liveOk ? `Live · ${ageSec ?? 0}s ago` : unavailable ? "Unavailable" : "Delayed"}
+              </span>
             </span>
-          </span>
+          ) : (
+            <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground" data-testid="history-indicator">
+              {history.isFetching
+                ? "Loading history…"
+                : histInfo?.available
+                  ? `History · ${histInfo.timeframe} · ${histInfo.count} bars · since ${sinceLabel(histInfo.oldest)}`
+                  : "History unavailable"}
+            </span>
+          )}
         </div>
-        <Select value={tf} onValueChange={onTfChange}>
-          <SelectTrigger className="h-7 w-20 rounded-sm text-xs font-mono" data-testid="price-tf-select">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {TFS.map((t) => (
-              <SelectItem key={t} value={t} className="text-xs font-mono">
-                {t}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        {isLive && (
+          <Select value={tf} onValueChange={onTfChange}>
+            <SelectTrigger className="h-7 w-20 rounded-sm text-xs font-mono" data-testid="price-tf-select">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {TFS.map((t) => (
+                <SelectItem key={t} value={t} className="text-xs font-mono">
+                  {t}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
       </div>
+
+      {/* range selector */}
+      <div className="flex items-center gap-1 px-3 pt-2.5" data-testid="range-selector">
+        {RANGES.map((r) => (
+          <button
+            key={r}
+            onClick={() => setRange(r)}
+            data-testid={`range-${r}`}
+            className={`px-2.5 py-1 rounded-sm text-[11px] font-mono uppercase tracking-wider transition-colors ${
+              range === r
+                ? "bg-primary text-primary-foreground"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+            }`}
+          >
+            {r === "MAX" ? "Max" : r}
+          </button>
+        ))}
+        {!isLive && histInfo?.available && (
+          <span className="ml-auto text-[10px] font-mono text-muted-foreground">
+            {histInfo.has_more || histInfo.total_available > histInfo.count
+              ? `${histInfo.total_available} bars available`
+              : "full history"}
+          </span>
+        )}
+      </div>
+
       <div className="px-3 py-2">
         {unavailable && !display.length ? (
           <div className="grid place-items-center text-xs text-muted-foreground font-mono text-center px-4" style={{ height: 240 }} data-testid="chart-unavailable">
-            {data?.reason || "Live data for this market is temporarily unavailable."}
+            {reason || "Data for this market is temporarily unavailable."}
           </div>
         ) : (
           <Candlestick candles={display} height={240} liveLast={hasLive} />

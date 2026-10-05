@@ -97,23 +97,27 @@ async def overall() -> dict:
     return _summarize(await _recent())
 
 
-async def calibrate_winprob(predicted: float, symbol: str, side: str) -> float:
-    """Blend the simulation's win odds with what this setup ACTUALLY achieves,
-    weighting realized data by sample size (shrinkage). Also pull the raw
-    (over-optimistic) sim odds toward a realistic ceiling so a 97% never slips
-    through untouched."""
+async def calibrate_winprob(predicted: float, symbol: str, side: str, hist: dict = None) -> float:
+    """Blend the simulation's win odds with (1) a HISTORICAL backtest prior for
+    this asset+side (from deep-history profiling) and (2) what the setup has
+    ACTUALLY achieved live, weighting realized data by sample size. Pulls
+    untested high odds toward a realistic band so a 97% never slips through."""
     pred = max(0.02, min(0.97, float(predicted)))
+    base = pred
+    had_prior = False
+    if hist and hist.get("n") and hist["n"] >= 20 and hist.get("win") is not None:
+        hn = min(30, hist["n"])
+        hw = hn / (hn + 15.0)
+        base = (1 - hw) * base + hw * float(hist["win"])
+        had_prior = True
     s = await stats(symbol, side)
     n = s["n"] or 0
     if n >= MIN_SAMPLE and s["win_rate"] is not None:
         w = n / (n + PRIOR_STRENGTH)
-        blended = (1 - w) * pred + w * s["win_rate"]
-    else:
-        blended = pred
-    # honesty cap: untested high-odds get discounted toward a realistic band
-    if n < MIN_SAMPLE:
-        blended = min(blended, 0.78)
-    return round(max(0.02, min(0.95, blended)), 3)
+        base = (1 - w) * base + w * s["win_rate"]
+    elif n < MIN_SAMPLE and not had_prior:
+        base = min(base, 0.78)  # honesty cap only when we have no evidence at all
+    return round(max(0.02, min(0.95, base)), 3)
 
 
 async def edge_block(symbol: str, side: str):
