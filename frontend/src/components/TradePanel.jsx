@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   ShieldCheck, ShieldAlert, Check, X, TrendingUp, TrendingDown,
-  Loader2, Gauge, ScrollText, CircleDollarSign,
+  Loader2, Gauge, ScrollText, CircleDollarSign, Target,
 } from "lucide-react";
 import { api, fmtUsd, fmtNum, pnlColor, fmtTime, formatApiErrorDetail } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -143,6 +143,26 @@ export function TradePanel() {
           <Stat label="Floating" value={fmtUsd(pnl?.floating)} cls={pnlColor(pnl?.floating)} />
         </div>
 
+        {/* 2x balance growth goal */}
+        {account?.available && account?.growth && (
+          <div className="border border-primary/40 bg-primary/5 rounded-sm p-3" data-testid="growth-goal">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[10px] font-mono uppercase tracking-[0.1em] text-muted-foreground flex items-center gap-1.5">
+                <Target className="h-3.5 w-3.5" /> Goal · double the balance
+              </span>
+              <span className="num text-sm text-primary">
+                {fmtUsd(account.equity)} / {fmtUsd(account.growth.target_balance)}
+              </span>
+            </div>
+            <Progress value={account.growth.growth_pct} className="h-2 [&>div]:bg-primary" />
+            <div className="mt-1.5 text-[10px] font-mono text-muted-foreground">
+              {account.growth.goal_reached
+                ? "🎯 2× goal reached — the bot keeps compounding from here."
+                : `${account.growth.growth_pct}% of the way from ${fmtUsd(account.growth.start_balance)} to the ${fmtUsd(account.growth.target_balance)} goal. SL/TP are set from each trade's prediction to grow the balance (no guarantees).`}
+            </div>
+          </div>
+        )}
+
         <div className="border border-border/40 bg-background rounded-sm p-3" data-testid="kill-switch">
           <div className="flex items-center justify-between mb-1.5">
             <span className="text-[10px] font-mono uppercase tracking-[0.1em] text-muted-foreground flex items-center gap-1.5">
@@ -245,10 +265,12 @@ export function TradePanel() {
                     <div className="grid grid-cols-3 gap-2 mb-2">
                       <Stat label="Sim win odds" value={p.win_prob != null ? `${Math.round(p.win_prob * 100)}%` : "—"} cls="text-primary" />
                       <Stat label="Expected" value={p.expected_r != null ? `${p.expected_r >= 0 ? "+" : ""}${p.expected_r.toFixed(2)}R` : "—"} cls={pnlColor(p.expected_r)} />
-                      <Stat label="Hold ≈" value={p.hold_label || "—"} />
+                      <Stat label="R:R" value={p.rr != null ? `${p.rr.toFixed(1)}:1` : "—"} />
                     </div>
-                    <div className="grid grid-cols-1 mb-2">
-                      <Stat label="Risk ≈" value={p.est_risk_usd != null ? fmtUsd(p.est_risk_usd) : "—"} />
+                    <div className="grid grid-cols-3 gap-2 mb-2">
+                      <Stat label="Risk ≈" value={p.est_risk_usd != null ? fmtUsd(p.est_risk_usd) : "—"} cls="text-sell" />
+                      <Stat label="Reward ≈" value={p.est_reward_usd != null ? fmtUsd(p.est_reward_usd) : "—"} cls="text-buy" />
+                      <Stat label="Hold ≈" value={p.hold_label || "—"} />
                     </div>
                     {p.reasons?.length > 0 && (
                       <ul className="text-[11px] text-muted-foreground font-mono space-y-0.5 mb-2 list-disc pl-4">

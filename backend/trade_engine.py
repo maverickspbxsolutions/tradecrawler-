@@ -283,10 +283,57 @@ def _clamp_lot(spec: dict, desired: float, sl_dist: float):
     return lot, est_risk, vpu
 
 
+def _cap_lot_to_risk(spec: dict, lot: float, sl_dist: float, equity) -> float:
+    """Reduce the lot so a stop-loss hit risks at most RISK_CAP_PCT of equity.
+    Never increases the lot; floors to the symbol's volume step."""
+    try:
+        eq = float(equity or 0)
+    except (TypeError, ValueError):
+        eq = 0.0
+    vpu = _value_per_unit(spec)
+    per_lot_risk = sl_dist * vpu
+    if eq <= 0 or per_lot_risk <= 0:
+        return lot
+    max_lot_by_risk = (eq * rc.RISK_CAP_PCT) / per_lot_risk
+    if max_lot_by_risk >= lot:
+        return lot
+    step = float(spec.get("volumeStep") or spec.get("lotStep") or 0.01)
+    vmin = float(spec.get("minVolume") or spec.get("volumeMin") or rc.MIN_LOT)
+    capped = np.floor(max_lot_by_risk / step) * step if step else max_lot_by_risk
+    return round(max(vmin, min(capped, lot)), 2)
+
+
 def _min_stop_dist(spec: dict) -> float:
     pt = float(spec.get("point") or spec.get("tickSize") or 0)
     stops = float(spec.get("stopsLevel") or 0)
     return stops * pt
+
+
+# Reward:risk targets the simulation chooses between. Letting winners run (higher
+# R) is how the balance compounds toward the 2x goal — but only when the forward
+# simulation says the higher target still carries positive expected value.
+_RR_CANDIDATES = (1.0, 1.5, 2.0, 2.5, 3.0)
+
+
+def _optimize_levels(candles: list, side: str, entry: float, atr: float,
+                     score: int, horizon: int) -> dict:
+    """Logically set SL/TP from the forward prediction. The stop is anchored to
+    volatility (ATR) to protect capital; the take-profit is chosen by simulating
+    each reward:risk target and keeping the one with the best expected value
+    (growth objective), tie-broken by win probability."""
+    sl_dist = max(1.3 * atr, entry * 0.0012)
+    best = None
+    for rr in _RR_CANDIDATES:
+        tp_dist = rr * sl_dist
+        if side == "BUY":
+            sl, tp = entry - sl_dist, entry + tp_dist
+        else:
+            sl, tp = entry + sl_dist, entry - tp_dist
+        pred = _predict(candles, side, entry, sl, tp, score, horizon)
+        key = (pred["expected_r"], pred["win_prob"])
+        if best is None or key > best["key"]:
+            best = {"rr": rr, "sl_dist": sl_dist, "tp_dist": tp_dist, "pred": pred, "key": key}
+    return best
 
 
 # ----------------------------- proposals -----------------------------
@@ -331,21 +378,24 @@ async def _analyze(signal_symbol: str, timeframe: str, horizon: int) -> dict:
     price = float(live.get("price") or candles[-1]["c"])
     atr = _atr(candles) or price * 0.004
     d = _digits(price)
-    sl_dist = round(1.5 * atr, d)
-    tp_dist = round(1.5 * sl_dist, d)
+    # prediction-driven SL/TP: simulate several targets, keep the best-EV one
+    opt = _optimize_levels(candles, side, price, atr, score, horizon)
+    sl_dist = round(opt["sl_dist"], d)
+    tp_dist = round(opt["tp_dist"], d)
+    rr = opt["rr"]
     if side == "BUY":
         sl, tp = round(price - sl_dist, d), round(price + tp_dist, d)
     else:
         sl, tp = round(price + sl_dist, d), round(price - tp_dist, d)
 
-    pred = _predict(candles, side, price, sl, tp, score, horizon)
+    pred = opt["pred"]
     tf_min = _tf_minutes(timeframe)
     hold_min = pred["est_hold_bars"] * tf_min
     hold_label = _humanize_mins(hold_min)
     window_label = _humanize_mins(pred["horizon_bars"] * tf_min)
     base = {"mt5_symbol": mt5_sym, "signal_symbol": signal_symbol, "timeframe": timeframe,
             "direction": direction, "side": side, "confidence": int(conf),
-            "win_prob": pred["win_prob"], "expected_r": pred["expected_r"],
+            "win_prob": pred["win_prob"], "expected_r": pred["expected_r"], "rr": rr,
             "horizon_bars": pred["horizon_bars"], "est_hold_min": int(round(hold_min)),
             "hold_label": hold_label, "window_label": window_label,
             "price": round(price, d), "stop_loss": sl, "take_profit": tp, "sl_dist": sl_dist,
@@ -353,11 +403,12 @@ async def _analyze(signal_symbol: str, timeframe: str, horizon: int) -> dict:
             "reasons": ol.get("reasons", [])[:3]}
     if pred["win_prob"] < rc.MIN_WIN_PROB or pred["expected_r"] < rc.MIN_EXPECTED_R:
         base["ok"] = False
-        base["reason"] = (f"Sim {int(pred['win_prob']*100)}% win odds, {pred['expected_r']:+.2f}R "
-                          f"within {window_label} — not worth it. Waiting.")
+        base["reason"] = (f"Sim {int(pred['win_prob']*100)}% win odds at {rr:.1f}:1, "
+                          f"{pred['expected_r']:+.2f}R within {window_label} — not worth it. Waiting.")
         return base
     base["ok"] = True
-    base["reason"] = f"Tradeable: {int(pred['win_prob']*100)}% win odds, {pred['expected_r']:+.2f}R, hold {hold_label}."
+    base["reason"] = (f"Tradeable: {int(pred['win_prob']*100)}% win odds, {pred['expected_r']:+.2f}R "
+                      f"at {rr:.1f}:1 reward:risk, hold {hold_label}.")
     return base
 
 
@@ -402,7 +453,8 @@ async def propose(signal_symbol: str, timeframe: str = None) -> dict:
     side, price, d = a["side"], a["price"], _digits(a["price"])
     sl_dist = max(a["sl_dist"], _min_stop_dist(spec) * 1.2)  # respect broker min stop
     sl_dist = round(sl_dist, d)
-    tp_dist = round(1.5 * sl_dist, d)
+    rr = float(a.get("rr") or 1.5)
+    tp_dist = round(rr * sl_dist, d)
     if side == "BUY":
         sl, tp = round(price - sl_dist, d), round(price + tp_dist, d)
     else:
@@ -410,12 +462,27 @@ async def propose(signal_symbol: str, timeframe: str = None) -> dict:
 
     desired_lot = rc.confidence_lot(a["confidence"])
     lot, est_risk, vpu = _clamp_lot(spec, desired_lot, sl_dist)
+    # logical growth guard: never risk more than RISK_CAP_PCT of equity per trade
+    capped_note = ""
+    try:
+        acct = await account_summary()
+        equity = acct.get("equity") or acct.get("balance") if acct.get("available") else None
+    except Exception:  # noqa
+        equity = None
+    if equity:
+        safe_lot = _cap_lot_to_risk(spec, lot, sl_dist, equity)
+        if safe_lot < lot:
+            lot, est_risk, vpu = _clamp_lot(spec, safe_lot, sl_dist)
+            capped_note = (f" Lot trimmed to {lot} so this trade risks ≤ "
+                           f"{int(rc.RISK_CAP_PCT*100)}% of your ${round(float(equity),2)} equity.")
+    est_reward = round(est_risk * rr, 2) if est_risk is not None else None
     reasons = list(a.get("reasons", []))
     reasons.append(
-        f"Simulation: {int(a['win_prob']*100)}% win odds, {a['expected_r']:+.2f}R expected; "
-        f"typically plays out in {a['hold_label']} (day-trade, within {a['window_label']}). "
-        f"Sized at {lot} lots on {a['confidence']}% confidence (risk ≈ "
-        f"${est_risk if est_risk is not None else '—'}).")
+        f"Simulation: {int(a['win_prob']*100)}% win odds, {a['expected_r']:+.2f}R expected at a "
+        f"{rr:.1f}:1 reward:risk target chosen to maximise growth; typically plays out in "
+        f"{a['hold_label']} (within {a['window_label']}). Sized at {lot} lots on {a['confidence']}% "
+        f"confidence — risking ≈ ${est_risk if est_risk is not None else '—'} to make ≈ "
+        f"${est_reward if est_reward is not None else '—'}.{capped_note}")
 
     prop = {
         "id": str(uuid.uuid4()),
@@ -433,10 +500,12 @@ async def propose(signal_symbol: str, timeframe: str = None) -> dict:
         "volatility_pct": round(a["vol"], 2),
         "win_prob": a["win_prob"],
         "expected_r": a["expected_r"],
+        "rr": rr,
         "horizon_bars": a["horizon_bars"],
         "est_hold_min": a["est_hold_min"],
         "hold_label": a["hold_label"],
         "est_risk_usd": est_risk,
+        "est_reward_usd": est_reward,
         "reasons": reasons,
         "status": "pending",
         "decided_at": None,
@@ -581,7 +650,8 @@ async def _fresh_stops(p: dict, spec: dict):
     # minimum allowed stop distance from the broker, with a safety buffer
     min_stop = _min_stop_dist(spec)
     sl_dist = max(risk, min_stop * 1.5, price * 0.0008)
-    tp_dist = 1.5 * sl_dist
+    rr = float(p.get("rr") or 1.5)
+    tp_dist = rr * sl_dist
 
     def _snap(v):
         return round(round(v / tick) * tick, digits) if tick else round(v, digits)
@@ -687,21 +757,45 @@ def _safe(v):
     return v
 
 
+async def _growth_target(current_equity) -> dict:
+    """Track progress toward doubling the demo balance. The starting balance is
+    captured once (the first time we can read the account) and the goal is 2x it."""
+    cur = float(current_equity or 0)
+    meta = await db.bot_meta.find_one({"_id": "growth"}, {"_id": 0})
+    if not meta or not meta.get("start_balance"):
+        start = cur or 0.0
+        meta = {"start_balance": round(start, 2), "created_at": _now().isoformat()}
+        await db.bot_meta.update_one({"_id": "growth"}, {"$set": meta}, upsert=True)
+    start = float(meta.get("start_balance") or cur or 0.0)
+    target = round(start * 2, 2)
+    denom = (target - start) or 1.0
+    progress = max(0.0, min(100.0, (cur - start) / denom * 100))
+    return {"start_balance": round(start, 2), "target_balance": target,
+            "growth_pct": round(progress, 1),
+            "goal_reached": cur >= target and target > 0}
+
+
 async def account_summary() -> dict:
     try:
         info = await mt5_trader.account_info()
     except Exception as e:  # noqa
         return {"available": False, "reason": str(e)}
-    return {
+    equity = info.get("equity")
+    summary = {
         "available": True,
         "balance": info.get("balance"),
-        "equity": info.get("equity"),
+        "equity": equity,
         "currency": info.get("currency"),
         "trade_allowed": info.get("tradeAllowed"),
         "is_demo": _is_demo(info),
         "server": info.get("server"),
         "leverage": info.get("leverage"),
     }
+    try:
+        summary["growth"] = await _growth_target(equity if equity is not None else info.get("balance"))
+    except Exception as e:  # noqa
+        logger.warning(f"growth target failed: {e}")
+    return summary
 
 
 async def open_positions() -> list:

@@ -42,6 +42,11 @@ MIN_CONFIDENCE = 58
 MIN_WIN_PROB = 0.45          # breakeven for a 1.5 reward:risk is ~0.40
 MIN_EXPECTED_R = 0.05        # expected value must beat 0.05R
 
+# Growth guard: however big the confidence-scaled lot is, never risk more than
+# this fraction of equity on a single trade. Doubling the balance requires
+# surviving losers — a trade that risks half the account is not "logical growth".
+RISK_CAP_PCT = 0.20
+
 # Forward Monte-Carlo prediction settings. Tuned for intraday day-trading:
 # 15-minute bars with a 20-bar (~5 hour) max horizon. Profit/odds are measured
 # over a 30-minute to 5-hour window, matching the user's typical hold time.
@@ -88,6 +93,7 @@ def as_dict() -> dict:
         "risk_per_trade_usd": RISK_PER_TRADE_USD,
         "min_confidence": MIN_CONFIDENCE,
         "min_win_prob": MIN_WIN_PROB,
+        "risk_cap_pct": RISK_CAP_PCT,
         "dynamic_lot_sizing": True,
         "confidence_scaled_lots": True,
     }
