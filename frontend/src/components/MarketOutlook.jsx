@@ -5,7 +5,7 @@ import { TrendingUp, TrendingDown, Minus, Activity } from "lucide-react";
 const DIR = {
   Up: { v: "--buy", icon: TrendingUp, label: "Leaning Up" },
   Down: { v: "--sell", icon: TrendingDown, label: "Leaning Down" },
-  Neutral: { v: "--muted-foreground", icon: Minus, label: "Range / Unclear" },
+  Neutral: { v: "--muted-foreground", icon: Minus, label: "No clear direction" },
 };
 
 function Chip({ label, value, tone }) {
@@ -68,7 +68,7 @@ export function MarketOutlook({ symbol, tf }) {
                     {d.label}
                   </span>
                   <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono mt-1">
-                    bias score {data.score > 0 ? "+" : ""}{data.score}
+                    lean {data.score > 0 ? "+" : ""}{data.score}
                   </span>
                 </div>
               </div>
@@ -76,7 +76,7 @@ export function MarketOutlook({ symbol, tf }) {
                 <span className="num text-2xl font-bold" style={{ color }} data-testid="outlook-confidence">
                   {data.confidence}%
                 </span>
-                <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono">confidence</span>
+                <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono">how sure</span>
               </div>
             </div>
 
@@ -89,10 +89,10 @@ export function MarketOutlook({ symbol, tf }) {
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-              <Chip label="Trend Slope" value={m.trend_slope_pct != null ? `${m.trend_slope_pct}%` : "—"} tone={slopeTone} />
-              <Chip label="RSI" value={m.rsi ?? "—"} />
-              <Chip label="MACD" value={m.macd_hist ?? "—"} tone={macdTone} />
-              <Chip label="Volatility" value={m.volatility_label || "—"} />
+              <Chip label="Direction" value={m.trend_slope_pct != null ? (m.trend_slope_pct > 0.02 ? "Rising" : m.trend_slope_pct < -0.02 ? "Falling" : "Flat") : "—"} tone={slopeTone} />
+              <Chip label="Recent strength" value={m.rsi != null ? (m.rsi >= 70 ? "Overdone up" : m.rsi <= 30 ? "Overdone down" : m.rsi > 50 ? "Up" : "Down") : "—"} />
+              <Chip label="Who's winning" value={m.macd_hist != null ? (m.macd_hist > 0 ? "Buyers" : "Sellers") : "—"} tone={macdTone} />
+              <Chip label="Price swings" value={m.volatility_label || "—"} />
             </div>
 
             <ul className="space-y-1.5" data-testid="outlook-reasons">

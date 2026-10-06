@@ -95,71 +95,83 @@ def assess(candles: list, htf_dir: str | None = None) -> dict:
     elif vr <= VR_REVERT and adx < ADX_TREND:
         regime = "reversion"
     else:
-        return {"tradeable": False, "regime": "chop", "adx": round(adx),
-                "reason": f"Unclear regime (ADX {adx:.0f}, VR {vr:.2f}) — no edge, standing aside."}
+        return {"tradeable": False, "regime": "chop", "regime_label": "Choppy", "adx": round(adx),
+                "reason": "The market's choppy right now with no clear direction — waiting for a cleaner setup."}
 
     reasons, score = [], 0
     if regime == "momentum":
+        regime_label = "Trending"
         direction = "Up" if (e20 > e50 and price > e20) else "Down" if (e20 < e50 and price < e20) else None
         if not direction:
-            return {"tradeable": False, "regime": regime, "adx": round(adx),
-                    "reason": "Momentum regime but price between the moving averages — waiting for a clean side."}
+            return {"tradeable": False, "regime": regime, "regime_label": regime_label, "adx": round(adx),
+                    "reason": "The market's trending but price is stuck in the middle — waiting for it to pick a side."}
         up = direction == "Up"
-        # trend structure (25)
-        score += 25; reasons.append(f"Momentum regime: ADX {adx:.0f}, price {'above' if up else 'below'} EMA20/50.")
-        # slope (10)
+        word = "rising" if up else "falling"
+        score += 25; reasons.append(f"The market is {word} steadily (a clear trend).")
         slope = (e20 - e20_prev)
         if (up and slope > 0) or (not up and slope < 0):
-            score += 10; reasons.append("EMA20 slope confirms the trend direction.")
-        # momentum trigger MACD (15)
+            score += 10; reasons.append(f"The short-term average is still {word} — trend is healthy.")
         h = float(hist.iloc[-1])
         if (up and h > 0) or (not up and h < 0):
-            score += 15; reasons.append("MACD momentum agrees.")
-        # RSI not stretched against us (10)
+            score += 15; reasons.append("Momentum is pushing the same way.")
         if (up and r < 72) or (not up and r > 28):
             score += 10
-        # DI agreement (10)
         if (up and float(pdi.iloc[-1]) > float(ndi.iloc[-1])) or (not up and float(ndi.iloc[-1]) > float(pdi.iloc[-1])):
-            score += 10; reasons.append("Directional index (+DI/-DI) confirms.")
-    else:  # reversion — fade the stretched extreme back toward the mean
-        if r <= RSI_FADE_LO:
+            score += 10; reasons.append("Buyers are in control." if up else "Sellers are in control.")
+    else:  # range-bound — buy dips / sell spikes back toward the average
+        regime_label = "Range-bound"
+        mean = float(ma20.iloc[-1]) if ma20.iloc[-1] == ma20.iloc[-1] else price
+        if price < mean and r < 50:
             direction = "Up"
-        elif r >= RSI_FADE_HI:
+        elif price > mean and r > 50:
             direction = "Down"
         else:
-            return {"tradeable": False, "regime": regime, "adx": round(adx),
-                    "reason": f"Mean-reversion regime but RSI {r:.0f} isn't stretched enough — no fade setup."}
+            return {"tradeable": False, "regime": regime, "regime_label": regime_label, "adx": round(adx),
+                    "reason": "The market's bouncing in a range, but price is sitting near its average — no good bounce to trade yet."}
         up = direction == "Up"
-        score += 25; reasons.append(f"Mean-reversion regime (ADX {adx:.0f}, VR {vr:.2f}); fading RSI {r:.0f}.")
+        score += 20
+        reasons.append(f"The market is range-bound and price has {'dropped below' if up else 'risen above'} "
+                       f"its recent average — betting it bounces back {'up' if up else 'down'}.")
+        stretch = abs(50 - r)
+        if stretch >= 18:
+            score += 28; reasons.append("Price has moved a long way from the average (very stretched).")
+        elif stretch >= 11:
+            score += 20; reasons.append("Price has moved well away from the average.")
+        elif stretch >= 6:
+            score += 12; reasons.append("Price has drifted away from the average.")
         div = _rsi_divergence(close, rsi)
         if (up and div == "bull") or (not up and div == "bear"):
-            score += 20; reasons.append(f"{'Bullish' if up else 'Bearish'} RSI divergence confirms exhaustion.")
-        # price at Bollinger extreme
+            score += 15; reasons.append("Momentum is already starting to turn back — a bounce looks likely.")
         if len(ma20) and sd20.iloc[-1] == sd20.iloc[-1]:
             band = 2 * float(sd20.iloc[-1])
-            if (up and price <= float(ma20.iloc[-1]) - band * 0.9) or (not up and price >= float(ma20.iloc[-1]) + band * 0.9):
-                score += 10; reasons.append("Price is at the outer Bollinger band — stretched.")
+            if (up and price <= mean - band * 0.8) or (not up and price >= mean + band * 0.8):
+                score += 12; reasons.append("Price is right at the edge of its normal range.")
+            elif (up and price <= mean - band * 0.5) or (not up and price >= mean + band * 0.5):
+                score += 6
 
-    # shared confluence factors
+    # extra confirmations
     if htf_dir and ((direction == "Up" and htf_dir != "Down") or (direction == "Down" and htf_dir != "Up")):
-        score += 10; reasons.append(f"Higher timeframe ({htf_dir}) is aligned.")
+        score += 10; reasons.append("The bigger-picture trend agrees with this trade.")
     elif htf_dir and ((direction == "Up" and htf_dir == "Down") or (direction == "Down" and htf_dir == "Up")):
-        score -= 15; reasons.append(f"Higher timeframe ({htf_dir}) disagrees — penalised.")
+        score -= 15; reasons.append("The bigger-picture trend disagrees — counted against this trade.")
     if vol_ratio >= 1.3:
-        score += 10; reasons.append(f"Volume expanding ({vol_ratio:.1f}x average).")
+        score += 10; reasons.append("Trading activity is picking up (more people trading).")
     if squeeze_release:
-        score += 10; reasons.append("Volatility squeeze releasing — expansion underway.")
+        score += 10; reasons.append("The market just woke up after a quiet stretch — a bigger move may be starting.")
 
     score = int(max(0, min(100, score)))
     tradeable = score >= MIN_SCORE
+    buy = direction == "Up"
     return {
-        "tradeable": tradeable, "regime": regime, "direction": direction,
-        "side": "BUY" if direction == "Up" else "SELL",
+        "tradeable": tradeable, "regime": regime, "regime_label": regime_label, "direction": direction,
+        "side": "BUY" if buy else "SELL",
         "score": score, "confidence": int(min(92, 50 + score * 0.45)),
         "adx": round(adx), "vr": round(vr, 2), "rsi": round(r, 1),
         "atr": float(atr.iloc[-1]) if atr.iloc[-1] == atr.iloc[-1] else price * 0.004,
         "vol_ratio": round(vol_ratio, 2), "squeeze_release": squeeze_release,
         "reasons": reasons,
-        "reason": (f"{regime.title()} {('BUY' if direction=='Up' else 'SELL')} · confluence {score}/100"
-                   if tradeable else f"{regime.title()} setup only scored {score}/100 (need {MIN_SCORE}). Waiting."),
+        "reason": (f"{'Buy' if buy else 'Sell'} setup on a {regime_label.lower()} market · setup strength {score}/100"
+                   if tradeable
+                   else f"{'Buy' if buy else 'Sell'} idea on a {regime_label.lower()} market, but it's only "
+                        f"{score}/100 strong (needs {MIN_SCORE}) — waiting for a better one."),
     }

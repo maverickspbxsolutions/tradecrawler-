@@ -198,24 +198,28 @@ export function TradePanel() {
           <div className="border border-border/40 bg-background rounded-sm p-3" data-testid="learned-edge">
             <div className="flex items-center justify-between mb-1.5">
               <span className="text-[10px] font-mono uppercase tracking-[0.1em] text-muted-foreground flex items-center gap-1.5">
-                <Brain className="h-3.5 w-3.5" /> Learned edge · last {edge.overall.n} trades
+                <Brain className="h-3.5 w-3.5" /> What the bot has learned · last {edge.overall.n} trades
               </span>
               <span className={`num text-sm ${pnlColor(edge.overall.expectancy_r)}`}>
-                {edge.overall.expectancy_r >= 0 ? "+" : ""}{edge.overall.expectancy_r}R / trade
+                {Math.round((edge.overall.win_rate || 0) * 100)}% won
               </span>
             </div>
             <div className="text-[10px] font-mono text-muted-foreground mb-1.5">
-              {Math.round((edge.overall.win_rate || 0) * 100)}% win · net {edge.overall.total_r >= 0 ? "+" : ""}{edge.overall.total_r}R.
-              The bot calibrates each setup's odds to these real results and skips ones that keep losing.
+              {edge.overall.expectancy_r >= 0
+                ? "On average these trades made money. "
+                : "On average these trades lost money. "}
+              The bot keeps score of what actually works on each market and stops taking the setups that keep losing.
             </div>
             {edge.setups?.length > 0 && (
               <div className="divide-y divide-border/30 border-t border-border/30">
                 {edge.setups.slice(0, 4).map((s) => (
                   <div key={s.setup} className="flex items-center justify-between py-1 text-[11px] font-mono" data-testid={`edge-${s.setup}`}>
-                    <span className={s.setup.startsWith("BUY") ? "text-buy" : "text-sell"}>{s.setup}</span>
+                    <span className={s.setup.startsWith("BUY") ? "text-buy" : "text-sell"}>
+                      {s.setup.replace("BUY", "Buy").replace("SELL", "Sell")}
+                    </span>
                     <span className="text-muted-foreground">
-                      {s.n}× · {Math.round((s.win_rate || 0) * 100)}% ·
-                      <span className={pnlColor(s.expectancy_r)}> {s.expectancy_r >= 0 ? "+" : ""}{s.expectancy_r}R</span>
+                      {s.n} trades ·
+                      <span className={pnlColor(s.expectancy_r)}> {Math.round((s.win_rate || 0) * 100)}% won</span>
                     </span>
                   </div>
                 ))}
@@ -299,14 +303,14 @@ export function TradePanel() {
                       <Stat label="Take profit" value={fmtNum(p.take_profit)} cls="text-buy" />
                     </div>
                     <div className="grid grid-cols-3 gap-2 mb-2">
-                      <Stat label="Sim win odds" value={p.win_prob != null ? `${Math.round(p.win_prob * 100)}%` : "—"} cls="text-primary" />
-                      <Stat label="Expected" value={p.expected_r != null ? `${p.expected_r >= 0 ? "+" : ""}${p.expected_r.toFixed(2)}R` : "—"} cls={pnlColor(p.expected_r)} />
-                      <Stat label="R:R" value={p.rr != null ? `${p.rr.toFixed(1)}:1` : "—"} />
+                      <Stat label="Chance of working" value={p.win_prob != null ? `${Math.round(p.win_prob * 100)}%` : "—"} cls="text-primary" />
+                      <Stat label="Setup strength" value={p.score != null ? `${p.score}/100` : "—"} />
+                      <Stat label="Market" value={p.regime_label || "—"} />
                     </div>
                     <div className="grid grid-cols-3 gap-2 mb-2">
-                      <Stat label="Risk ≈" value={p.est_risk_usd != null ? fmtUsd(p.est_risk_usd) : "—"} cls="text-sell" />
-                      <Stat label="Reward ≈" value={p.est_reward_usd != null ? fmtUsd(p.est_reward_usd) : "—"} cls="text-buy" />
-                      <Stat label="Hold ≈" value={p.hold_label || "—"} />
+                      <Stat label="You risk" value={p.est_risk_usd != null ? fmtUsd(p.est_risk_usd) : "—"} cls="text-sell" />
+                      <Stat label="You aim to win" value={p.est_reward_usd != null ? fmtUsd(p.est_reward_usd) : "—"} cls="text-buy" />
+                      <Stat label="Usually takes" value={p.hold_label || "—"} />
                     </div>
                     {p.reasons?.length > 0 && (
                       <ul className="text-[11px] text-muted-foreground font-mono space-y-0.5 mb-2 list-disc pl-4">

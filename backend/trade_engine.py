@@ -487,6 +487,7 @@ async def _analyze(signal_symbol: str, timeframe: str, horizon: int) -> dict:
             "direction": direction, "side": side, "confidence": int(conf),
             "win_prob": cal_win, "expected_r": cal_ev, "sim_win_prob": pred["win_prob"], "rr": rr,
             "adx": round(adx_v, 0), "htf_dir": htf_dir, "regime": regime.get("trend"),
+            "regime_label": ev.get("regime_label"),
             "score": ev.get("score"), "vr": ev.get("vr"),
             "edge_n": es.get("n"), "edge_expectancy": es.get("expectancy_r"),
             "hist_win": prof.get("hist_win"), "hist_expectancy": prof.get("hist_expectancy"),
@@ -496,18 +497,18 @@ async def _analyze(signal_symbol: str, timeframe: str, horizon: int) -> dict:
             "price": round(price, d), "stop_loss": sl, "take_profit": tp, "sl_dist": sl_dist,
             "vol": float((ol.get("metrics") or {}).get("volatility_pct") or 0),
             "reasons": (ev.get("reasons") or ol.get("reasons", []))[:4]}
+    verb = "Buy" if side == "BUY" else "Sell"
+    mkt = (ev.get("regime_label") or "").lower()
     breakeven = 1.0 / (1.0 + rr)
     win_floor = max(0.33, breakeven + 0.02)  # must clear breakeven with margin
     if cal_win < win_floor or cal_ev < rc.MIN_EXPECTED_R:
         base["ok"] = False
-        base["reason"] = (f"{ev['regime'].title()} {side} scored {ev['score']}/100 but calibrated "
-                          f"{int(cal_win*100)}% win at {rr:.1f}:1 → {cal_ev:+.2f}R — not a positive edge. Waiting.")
+        base["reason"] = (f"{verb} idea on a {mkt} market (setup strength {ev['score']}/100), but only about a "
+                          f"{int(cal_win*100)}% chance of working — not worth the risk yet, so waiting.")
         return base
     base["ok"] = True
-    edge_note = (f" · learned {es['n']} trades {es['expectancy_r']:+.2f}R" if es.get("n") else "")
-    base["reason"] = (f"{ev['regime'].title()} {side} · confluence {ev['score']}/100 · "
-                      f"{int(cal_win*100)}% win, {cal_ev:+.2f}R at {rr:.1f}:1, ADX {adx_v:.0f}, "
-                      f"hold {hold_label}{edge_note}.")
+    base["reason"] = (f"{verb} setup on a {mkt} market — about a {int(cal_win*100)}% chance of working "
+                      f"(setup strength {ev['score']}/100). Usually plays out in {hold_label}.")
     return base
 
 
@@ -525,7 +526,8 @@ async def scan_status() -> list:
             "tradeable": a.get("ok", False), "side": a.get("side"),
             "direction": a.get("direction"), "confidence": a.get("confidence"),
             "win_prob": a.get("win_prob"), "expected_r": a.get("expected_r"),
-            "regime": a.get("regime"), "score": a.get("score"), "adx": a.get("adx"),
+            "regime": a.get("regime"), "regime_label": a.get("regime_label"),
+            "score": a.get("score"), "adx": a.get("adx"),
             "hold_label": a.get("hold_label"), "reason": a.get("reason"),
         })
     return out
@@ -582,11 +584,11 @@ async def propose(signal_symbol: str, timeframe: str = None) -> dict:
     est_reward = round(est_risk * rr, 2) if est_risk is not None else None
     reasons = list(a.get("reasons", []))
     reasons.append(
-        f"Simulation: {int(a['win_prob']*100)}% win odds, {a['expected_r']:+.2f}R expected at a "
-        f"{rr:.1f}:1 reward:risk target chosen to maximise growth; typically plays out in "
-        f"{a['hold_label']} (within {a['window_label']}). Sized at {lot} lots on {a['confidence']}% "
-        f"confidence — risking ≈ ${est_risk if est_risk is not None else '—'} to make ≈ "
-        f"${est_reward if est_reward is not None else '—'}.{capped_note}")
+        f"The plan: {'buy' if side == 'BUY' else 'sell'} {lot} lots — risking about "
+        f"${est_risk if est_risk is not None else '—'} to aim for about "
+        f"${est_reward if est_reward is not None else '—'} "
+        f"(roughly a {int(a['win_prob']*100)}% chance of working). Usually wraps up in "
+        f"{a['hold_label']}.{capped_note}")
 
     prop = {
         "id": str(uuid.uuid4()),
@@ -603,6 +605,7 @@ async def propose(signal_symbol: str, timeframe: str = None) -> dict:
         "confidence": a["confidence"],
         "volatility_pct": round(a["vol"], 2),
         "regime": a.get("regime"),
+        "regime_label": a.get("regime_label"),
         "adx": a.get("adx"),
         "score": a.get("score"),
         "htf_dir": a.get("htf_dir"),

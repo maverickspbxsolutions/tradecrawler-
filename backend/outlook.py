@@ -47,47 +47,46 @@ def compute_outlook(candles: list, symbol: str = "", timeframe: str = "") -> dic
     # 1) Trend structure (EMA20 vs EMA50 vs price) — weight 0.30
     if e20 > e50 and price > e20:
         t = 1.0
-        reasons.append(f"Uptrend: price sits above both moving averages (EMA20 {_r(e20)} > EMA50 {_r(e50)}).")
+        reasons.append("Price is clearly heading up (above both its recent averages).")
     elif e20 < e50 and price < e20:
         t = -1.0
-        reasons.append(f"Downtrend: price sits below both moving averages (EMA20 {_r(e20)} < EMA50 {_r(e50)}).")
+        reasons.append("Price is clearly heading down (below both its recent averages).")
     elif e20 > e50:
         t = 0.4
-        reasons.append("Mildly bullish: short average above long average, but price is hesitating.")
+        reasons.append("Leaning up, but price is hesitating a bit.")
     else:
         t = -0.4
-        reasons.append("Mildly bearish: short average below long average.")
+        reasons.append("Leaning down right now.")
     comps.append(0.30 * t)
 
     # 2) Trend slope — weight 0.15
     slope = ((e20 - e20_prev) / e20_prev * 100) if e20_prev else 0.0
     comps.append(0.15 * max(-1.0, min(1.0, slope / 0.5)))
     reasons.append(
-        f"Trend is {'rising' if slope > 0.02 else 'falling' if slope < -0.02 else 'flat'} "
-        f"({_r(slope, 2)}% over the last 5 bars).")
+        f"The recent direction is {'climbing' if slope > 0.02 else 'slipping' if slope < -0.02 else 'flat'}.")
 
     # 3) RSI momentum — weight 0.20
     comps.append(0.20 * max(-1.0, min(1.0, (r - 50) / 25.0)))
     if r >= 70:
-        reasons.append(f"RSI {_r(r, 1)} is overbought — strong but stretched; pullback risk rises.")
+        reasons.append("Price has run up a lot recently — could be due for a pullback.")
     elif r <= 30:
-        reasons.append(f"RSI {_r(r, 1)} is oversold — weak but stretched; bounce risk rises.")
+        reasons.append("Price has dropped a lot recently — could be due for a bounce.")
     else:
-        reasons.append(f"RSI {_r(r, 1)} shows {'bullish' if r > 50 else 'bearish'} momentum.")
+        reasons.append(f"Short-term pressure is {'to the upside' if r > 50 else 'to the downside'}.")
 
     # 4) MACD momentum — weight 0.20
     if h > 0 and h > h_prev:
         m = 1.0
-        reasons.append("MACD momentum is positive and expanding — buyers gaining control.")
+        reasons.append("Buyers are taking control and gaining steam.")
     elif h > 0:
         m = 0.6
-        reasons.append("MACD momentum is positive — buyers in control.")
+        reasons.append("Buyers are in control for now.")
     elif h < 0 and h < h_prev:
         m = -1.0
-        reasons.append("MACD momentum is negative and expanding — sellers gaining control.")
+        reasons.append("Sellers are taking control and gaining steam.")
     else:
         m = -0.6
-        reasons.append("MACD momentum is negative — sellers in control.")
+        reasons.append("Sellers are in control for now.")
     comps.append(0.20 * m)
 
     # 5) Recent drift — weight 0.15
@@ -108,8 +107,8 @@ def compute_outlook(candles: list, symbol: str = "", timeframe: str = "") -> dic
 
     vol_label = "High" if vol > ref_vol * 1.4 else "Low" if vol < ref_vol * 0.6 else "Normal"
     reasons.append(
-        f"Volatility is {vol_label.lower()} right now — "
-        f"{'wider swings, trade smaller' if vol_label == 'High' else 'calm, quieter moves' if vol_label == 'Low' else 'typical conditions'}.")
+        f"Price swings are {vol_label.lower()} right now — "
+        f"{'bigger moves than usual, so trades are sized smaller' if vol_label == 'High' else 'calmer and quieter than usual' if vol_label == 'Low' else 'about normal'}.")
 
     metrics = {
         "price": _r(price, 4 if price < 10 else 2),
