@@ -52,17 +52,45 @@ export function LandingChart() {
     let t = Math.floor(Date.now() / 1000) - STEP * 60;
     let price = 100;
 
-    // make one candle via a short random walk with gentle upward drift
+    // organic market state: trend momentum drifts & reverses, volatility breathes
+    let momentum = 0.15;   // current directional bias (can go negative = pullback)
+    let vol = 1.4;         // current volatility, varies over time
+
+    const evolveRegime = () => {
+      // momentum mean-reverts toward a slight long-term up-bias with random shocks
+      momentum += (Math.random() - 0.5) * 0.5 + (0.1 - momentum) * 0.08;
+      momentum = Math.max(-1.1, Math.min(1.3, momentum));
+      // occasional volatility spikes & calms
+      vol += (Math.random() - 0.5) * 0.6 + (1.3 - vol) * 0.1;
+      vol = Math.max(0.6, Math.min(3.2, vol));
+      // rare sharp move
+      if (Math.random() < 0.06) momentum += (Math.random() - 0.4) * 1.6;
+    };
+
+    const tickPrice = () => {
+      // intrabar tick: momentum + noise scaled by current volatility
+      price += momentum * 0.35 + (Math.random() - 0.5) * vol;
+      price = Math.max(20, price);
+      return price;
+    };
+
     const makeCandle = (time) => {
+      evolveRegime();
       const open = price;
       let hi = open;
       let lo = open;
-      for (let i = 0; i < 6; i++) {
-        price += (Math.random() - 0.44) * 1.8;
+      const steps = 4 + Math.floor(Math.random() * 5);
+      for (let i = 0; i < steps; i++) {
+        tickPrice();
         hi = Math.max(hi, price);
         lo = Math.min(lo, price);
       }
-      price = Math.max(20, price);
+      // occasional long wick (rejection)
+      if (Math.random() < 0.25) {
+        if (Math.random() < 0.5) hi += Math.random() * vol * 2.2;
+        else lo -= Math.random() * vol * 2.2;
+        lo = Math.max(10, lo);
+      }
       return { time, open, high: Math.max(hi, price), low: Math.min(lo, price), close: price };
     };
 
@@ -76,23 +104,32 @@ export function LandingChart() {
     chart.timeScale().fitContent();
 
     // live forming candle that ticks, then commits
+    evolveRegime();
     let forming = { time: t, open: price, high: price, low: price, close: price };
     let ticks = 0;
+    const barTicks = 5 + Math.floor(Math.random() * 4);
 
+    let ticksInBar = barTicks;
     const id = setInterval(() => {
-      forming.close += (Math.random() - 0.44) * 1.8;
-      forming.close = Math.max(20, forming.close);
-      forming.high = Math.max(forming.high, forming.close);
-      forming.low = Math.min(forming.low, forming.close);
+      tickPrice();
+      forming.close = price;
+      forming.high = Math.max(forming.high, price);
+      forming.low = Math.min(forming.low, price);
       series.update(forming);
       ticks += 1;
 
-      if (ticks >= 7) {
-        // commit the candle, start a fresh one
-        price = forming.close;
+      if (ticks >= ticksInBar) {
+        // close candle, maybe add a wick, start a fresh one with a new regime
+        if (Math.random() < 0.25) {
+          if (Math.random() < 0.5) forming.high += Math.random() * vol * 2;
+          else forming.low = Math.max(10, forming.low - Math.random() * vol * 2);
+          series.update(forming);
+        }
         t += STEP;
+        evolveRegime();
         forming = { time: t, open: price, high: price, low: price, close: price };
         ticks = 0;
+        ticksInBar = 5 + Math.floor(Math.random() * 4);
         chart.timeScale().scrollToRealTime();
       }
     }, 280);
