@@ -1,31 +1,34 @@
 import { useRef, useEffect } from "react";
-import { createChart, AreaSeries, LineStyle } from "lightweight-charts";
+import { createChart, CandlestickSeries } from "lightweight-charts";
 
-// Decorative, continuously-growing scrolling chart for the landing page.
-// Data is synthetic (an upward-trending random walk) — purely for visual flair.
+// Decorative Deriv-style candlestick chart for the landing page.
+// A "forming" candle ticks live, then commits and a new one starts — purely visual.
 export function LandingChart() {
   const containerRef = useRef(null);
 
   useEffect(() => {
     if (!containerRef.current) return;
 
+    const GREEN = "#00E676";
+    const RED = "#FF3366";
+
     const chart = createChart(containerRef.current, {
       autoSize: true,
       localization: { locale: "en-US" },
       layout: {
         background: { color: "transparent" },
-        textColor: "rgba(0,230,118,0.45)",
+        textColor: "rgba(0,230,118,0.4)",
         fontFamily: "Azeret Mono, monospace",
         fontSize: 10,
         attributionLogo: false,
       },
       grid: {
-        vertLines: { color: "rgba(0,230,118,0.06)" },
-        horzLines: { color: "rgba(0,230,118,0.06)" },
+        vertLines: { color: "rgba(0,230,118,0.05)" },
+        horzLines: { color: "rgba(0,230,118,0.05)" },
       },
       rightPriceScale: { visible: false },
       leftPriceScale: { visible: false },
-      timeScale: { visible: false, borderVisible: false },
+      timeScale: { visible: false, borderVisible: false, barSpacing: 10 },
       crosshair: {
         vertLine: { visible: false, labelVisible: false },
         horzLine: { visible: false, labelVisible: false },
@@ -34,38 +37,65 @@ export function LandingChart() {
       handleScale: false,
     });
 
-    const series = chart.addSeries(AreaSeries, {
-      lineColor: "#00E676",
-      topColor: "rgba(0,230,118,0.35)",
-      bottomColor: "rgba(0,230,118,0.0)",
-      lineWidth: 2,
+    const series = chart.addSeries(CandlestickSeries, {
+      upColor: GREEN,
+      downColor: RED,
+      wickUpColor: GREEN,
+      wickDownColor: RED,
+      borderUpColor: GREEN,
+      borderDownColor: RED,
       priceLineVisible: false,
       lastValueVisible: false,
-      crosshairMarkerVisible: false,
     });
 
-    // seed an upward-trending series
-    const STEP = 60; // seconds between synthetic points
-    let t = Math.floor(Date.now() / 1000) - STEP * 120;
-    let value = 100;
+    const STEP = 60; // seconds between candles
+    let t = Math.floor(Date.now() / 1000) - STEP * 60;
+    let price = 100;
+
+    // make one candle via a short random walk with gentle upward drift
+    const makeCandle = (time) => {
+      const open = price;
+      let hi = open;
+      let lo = open;
+      for (let i = 0; i < 6; i++) {
+        price += (Math.random() - 0.44) * 1.8;
+        hi = Math.max(hi, price);
+        lo = Math.min(lo, price);
+      }
+      price = Math.max(20, price);
+      return { time, open, high: Math.max(hi, price), low: Math.min(lo, price), close: price };
+    };
+
+    // seed history
     const seed = [];
-    for (let i = 0; i < 120; i++) {
-      value += (Math.random() - 0.42) * 2.4 + 0.25; // gentle upward drift
-      value = Math.max(20, value);
-      seed.push({ time: t, value });
+    for (let i = 0; i < 60; i++) {
+      seed.push(makeCandle(t));
       t += STEP;
     }
     series.setData(seed);
     chart.timeScale().fitContent();
 
-    // keep growing + scrolling
+    // live forming candle that ticks, then commits
+    let forming = { time: t, open: price, high: price, low: price, close: price };
+    let ticks = 0;
+
     const id = setInterval(() => {
-      t += STEP;
-      value += (Math.random() - 0.42) * 2.4 + 0.25;
-      value = Math.max(20, value);
-      series.update({ time: t, value });
-      chart.timeScale().scrollToRealTime();
-    }, 850);
+      forming.close += (Math.random() - 0.44) * 1.8;
+      forming.close = Math.max(20, forming.close);
+      forming.high = Math.max(forming.high, forming.close);
+      forming.low = Math.min(forming.low, forming.close);
+      series.update(forming);
+      ticks += 1;
+
+      if (ticks >= 7) {
+        // commit the candle, start a fresh one
+        price = forming.close;
+        t += STEP;
+        forming = { time: t, open: price, high: price, low: price, close: price };
+        ticks = 0;
+        chart.timeScale().scrollToRealTime();
+      }
+    }, 280);
 
     return () => {
       clearInterval(id);
