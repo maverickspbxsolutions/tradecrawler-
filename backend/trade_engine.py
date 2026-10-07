@@ -378,12 +378,18 @@ _RR_CANDIDATES = (1.0, 1.5, 2.0, 2.5, 3.0)
 
 
 def _optimize_levels(candles: list, side: str, entry: float, atr: float,
-                     score: int, horizon: int) -> dict:
+                     score: int, horizon: int, swing_dist: float = None) -> dict:
     """Logically set SL/TP from the forward prediction. The stop is anchored to
-    volatility (ATR) to protect capital; the take-profit is chosen by simulating
-    each reward:risk target and keeping the one with the best expected value
+    the pullback/swing when the entry is well-timed (tighter, better-placed) and
+    otherwise to volatility (ATR); the take-profit is chosen by simulating each
+    reward:risk target and keeping the one with the best expected value
     (growth objective), tie-broken by win probability."""
-    sl_dist = max(1.3 * atr, entry * 0.0012)
+    atr_sl = max(1.3 * atr, entry * 0.0012)
+    sl_dist = atr_sl
+    if swing_dist and swing_dist > 0:
+        # well-timed entry near value -> stop just beyond the swing, but keep it
+        # sane: never tighter than ~0.6 ATR (noise) nor wider than the ATR stop.
+        sl_dist = min(max(swing_dist, 0.6 * atr, entry * 0.0008), atr_sl)
     best = None
     for rr in _RR_CANDIDATES:
         tp_dist = rr * sl_dist
@@ -464,7 +470,7 @@ async def _analyze(signal_symbol: str, timeframe: str, horizon: int) -> dict:
         atr = max(atr, float(prof["atr_pct"]) * price * 0.8)
     d = _digits(price)
     # prediction-driven SL/TP: simulate several targets, keep the best-EV one
-    opt = _optimize_levels(candles, side, price, atr, score, horizon)
+    opt = _optimize_levels(candles, side, price, atr, score, horizon, ev.get("swing_stop_dist"))
     sl_dist = round(opt["sl_dist"], d)
     tp_dist = round(opt["tp_dist"], d)
     rr = opt["rr"]
@@ -474,6 +480,13 @@ async def _analyze(signal_symbol: str, timeframe: str, horizon: int) -> dict:
         sl, tp = round(price + sl_dist, d), round(price - tp_dist, d)
 
     pred = opt["pred"]
+    # reject slow setups: if the sim says it'd take ~the whole max-hold window to
+    # resolve, it'll drag for hours — skip it in favour of a faster one.
+    if pred["est_hold_bars"] >= horizon * 0.9:
+        return {"ok": False, "mt5_symbol": mt5_sym, "direction": direction, "side": side,
+                "confidence": int(conf), "regime": ev.get("regime"), "score": ev.get("score"),
+                "reason": (f"{'Buy' if side == 'BUY' else 'Sell'} setup would likely drag on for hours before "
+                           f"paying off — skipping it for a faster one.")}
     # CALIBRATE the sim's odds against the asset's historical backtest AND live results
     hist_prior = {"n": prof.get("hist_n"), "win": prof.get("hist_win")} if prof.get("hist_n") else None
     cal_win = await learning.calibrate_winprob(pred["win_prob"], mt5_sym, side, hist_prior)
@@ -487,7 +500,7 @@ async def _analyze(signal_symbol: str, timeframe: str, horizon: int) -> dict:
             "direction": direction, "side": side, "confidence": int(conf),
             "win_prob": cal_win, "expected_r": cal_ev, "sim_win_prob": pred["win_prob"], "rr": rr,
             "adx": round(adx_v, 0), "htf_dir": htf_dir, "regime": regime.get("trend"),
-            "regime_label": ev.get("regime_label"),
+            "regime_label": ev.get("regime_label"), "trigger": ev.get("trigger"),
             "score": ev.get("score"), "vr": ev.get("vr"),
             "edge_n": es.get("n"), "edge_expectancy": es.get("expectancy_r"),
             "hist_win": prof.get("hist_win"), "hist_expectancy": prof.get("hist_expectancy"),
@@ -507,8 +520,10 @@ async def _analyze(signal_symbol: str, timeframe: str, horizon: int) -> dict:
                           f"{int(cal_win*100)}% chance of working — not worth the risk yet, so waiting.")
         return base
     base["ok"] = True
+    trig = ev.get("trigger")
+    entry_note = f" Entry: {trig.lower()}." if trig else ""
     base["reason"] = (f"{verb} setup on a {mkt} market — about a {int(cal_win*100)}% chance of working "
-                      f"(setup strength {ev['score']}/100). Usually plays out in {hold_label}.")
+                      f"(setup strength {ev['score']}/100).{entry_note} Usually plays out in {hold_label}.")
     return base
 
 
@@ -527,6 +542,7 @@ async def scan_status() -> list:
             "direction": a.get("direction"), "confidence": a.get("confidence"),
             "win_prob": a.get("win_prob"), "expected_r": a.get("expected_r"),
             "regime": a.get("regime"), "regime_label": a.get("regime_label"),
+            "trigger": a.get("trigger"),
             "score": a.get("score"), "adx": a.get("adx"),
             "hold_label": a.get("hold_label"), "reason": a.get("reason"),
         })
@@ -606,6 +622,7 @@ async def propose(signal_symbol: str, timeframe: str = None) -> dict:
         "volatility_pct": round(a["vol"], 2),
         "regime": a.get("regime"),
         "regime_label": a.get("regime_label"),
+        "trigger": a.get("trigger"),
         "adx": a.get("adx"),
         "score": a.get("score"),
         "htf_dir": a.get("htf_dir"),

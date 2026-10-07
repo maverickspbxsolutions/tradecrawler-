@@ -18,6 +18,24 @@ VR_REVERT = 0.92        # variance ratio < this => mean-reverting
 RSI_FADE_LO = 33.0      # fade long when RSI <= this in a reversion regime
 RSI_FADE_HI = 67.0      # fade short when RSI >= this in a reversion regime
 
+# ---- entry timing (don't chase; get in near value) ----
+EXT_MAX_ATR = 2.2       # price this many ATRs past the average = overextended -> wait
+PULLBACK_ZONE_ATR = 0.8 # a recent bar within this many ATRs of the average = a real pullback
+SWING_LOOKBACK = 5      # bars used to find the pullback/swing for a tight stop
+SWING_BUF_ATR = 0.25    # place the stop this far beyond the swing
+
+
+def _swing_stop_dist(high: pd.Series, low: pd.Series, price: float, up: bool, atr_v: float) -> float:
+    """Distance from entry to just beyond the recent swing (tight, well-placed stop)."""
+    lb = SWING_LOOKBACK
+    if up:
+        swing = float(low.iloc[-lb:].min())
+        dist = (price - swing) + SWING_BUF_ATR * atr_v
+    else:
+        swing = float(high.iloc[-lb:].max())
+        dist = (swing - price) + SWING_BUF_ATR * atr_v
+    return max(dist, 0.0)
+
 
 def _variance_ratio(logret: np.ndarray, k: int = 5) -> float:
     """VR>1 persistent (momentum), VR<1 anti-persistent (mean-reverting)."""
@@ -68,6 +86,8 @@ def assess(candles: list, htf_dir: str | None = None) -> dict:
     e20_prev = float(ema20.iloc[-6])
     adx = float(adx_s.iloc[-1]) if adx_s.iloc[-1] == adx_s.iloc[-1] else 0.0
     r = float(rsi.iloc[-1])
+    atr_v = float(atr.iloc[-1]) if atr.iloc[-1] == atr.iloc[-1] else price * 0.004
+    trigger, swing_dist = None, None
     logret = np.diff(np.log(close.values[close.values > 0]))
     vr = _variance_ratio(logret[-120:] if len(logret) >= 120 else logret)
 
@@ -118,6 +138,33 @@ def assess(candles: list, htf_dir: str | None = None) -> dict:
             score += 10
         if (up and float(pdi.iloc[-1]) > float(ndi.iloc[-1])) or (not up and float(ndi.iloc[-1]) > float(pdi.iloc[-1])):
             score += 10; reasons.append("Buyers are in control." if up else "Sellers are in control.")
+        # ---- entry timing: don't chase; enter on a pullback-resume or fresh breakout ----
+        ext_series = (close - ema20) / atr.replace(0, np.nan)
+        ext_dir = ext_series if up else -ext_series            # + = extended in the profit direction
+        ext_now = float(ext_dir.iloc[-1]) if ext_dir.iloc[-1] == ext_dir.iloc[-1] else 0.0
+        ext_min = float(ext_dir.iloc[-4:].min())
+        c1, c2 = float(close.iloc[-1]), float(close.iloc[-2])
+        resuming = (c1 > c2) if up else (c1 < c2)
+        if ext_now > EXT_MAX_ATR:
+            return {"tradeable": False, "regime": regime, "regime_label": regime_label, "adx": round(adx),
+                    "direction": direction, "side": "BUY" if up else "SELL", "score": score,
+                    "reason": "The trend has run too far from its average — waiting for a pullback to get in at a better price."}
+        pullback_resume = ext_min <= PULLBACK_ZONE_ATR and resuming
+        breakout = squeeze_release and resuming
+        if pullback_resume:
+            trigger = "Pulled back to value, turning back " + ("up" if up else "down")
+            score += 14
+            reasons.append("Price dipped back toward its average and is turning back "
+                           + ("up" if up else "down") + " — a good spot to get in.")
+        elif breakout:
+            trigger = "Fresh breakout after a quiet stretch"
+            score += 10
+            reasons.append("Price just broke out after a calm stretch — getting in early on the move.")
+        else:
+            return {"tradeable": False, "regime": regime, "regime_label": regime_label, "adx": round(adx),
+                    "direction": direction, "side": "BUY" if up else "SELL", "score": score,
+                    "reason": "The trend's there, but it's not a good spot to get in yet — waiting for a pullback or a fresh breakout."}
+        swing_dist = _swing_stop_dist(high, low, price, up, atr_v)
     else:  # range-bound — buy dips / sell spikes back toward the average
         regime_label = "Range-bound"
         mean = float(ma20.iloc[-1]) if ma20.iloc[-1] == ma20.iloc[-1] else price
@@ -148,6 +195,17 @@ def assess(candles: list, htf_dir: str | None = None) -> dict:
                 score += 12; reasons.append("Price is right at the edge of its normal range.")
             elif (up and price <= mean - band * 0.5) or (not up and price >= mean + band * 0.5):
                 score += 6
+        # ---- entry timing: wait for the bounce to actually start (don't catch a falling knife) ----
+        o1 = float(df["o"].astype(float).iloc[-1]) if "o" in df else float(close.iloc[-2])
+        c1, c2 = float(close.iloc[-1]), float(close.iloc[-2])
+        turning = ((c1 > c2) or (c1 > o1)) if up else ((c1 < c2) or (c1 < o1))
+        if not turning:
+            return {"tradeable": False, "regime": regime, "regime_label": regime_label, "adx": round(adx),
+                    "direction": direction, "side": "BUY" if up else "SELL", "score": score,
+                    "reason": "Price is stretched, but the bounce hasn't started yet — waiting for it to actually turn."}
+        trigger = "Bounce is starting"
+        score += 10; reasons.append("The bounce is starting — getting in just as it turns.")
+        swing_dist = _swing_stop_dist(high, low, price, up, atr_v)
 
     # extra confirmations
     if htf_dir and ((direction == "Up" and htf_dir != "Down") or (direction == "Down" and htf_dir != "Up")):
@@ -169,6 +227,8 @@ def assess(candles: list, htf_dir: str | None = None) -> dict:
         "adx": round(adx), "vr": round(vr, 2), "rsi": round(r, 1),
         "atr": float(atr.iloc[-1]) if atr.iloc[-1] == atr.iloc[-1] else price * 0.004,
         "vol_ratio": round(vol_ratio, 2), "squeeze_release": squeeze_release,
+        "trigger": trigger,
+        "swing_stop_dist": round(swing_dist, 8) if swing_dist else None,
         "reasons": reasons,
         "reason": (f"{'Buy' if buy else 'Sell'} setup on a {regime_label.lower()} market · setup strength {score}/100"
                    if tradeable
