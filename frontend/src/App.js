@@ -7,6 +7,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
 import Login from "@/pages/Login";
 import Dashboard from "@/pages/Dashboard";
+import { LicenseGate } from "@/components/LicenseGate";
 
 function ProtectedRoute({ children }) {
   const { user } = useAuth();
@@ -50,7 +51,9 @@ function App() {
                 path="/"
                 element={
                   <ProtectedRoute>
-                    <Dashboard />
+                    <LicenseGate>
+                      <Dashboard />
+                    </LicenseGate>
                   </ProtectedRoute>
                 }
               />

@@ -10,6 +10,7 @@ from typing import Optional
 
 from db import db
 from auth import get_current_user
+from licensing import platform_guard, require_advanced
 import market_data as md
 from strategy_engine import Strategy, StrategyCreate, StrategyUpdate
 from backtester import run_backtest
@@ -21,7 +22,7 @@ from outlook import compute_outlook
 import risk_config
 import trade_engine
 
-api = APIRouter(prefix="/api", dependencies=[Depends(get_current_user)])
+api = APIRouter(prefix="/api", dependencies=[Depends(platform_guard)])
 
 
 @api.get("/risk/config")
@@ -74,7 +75,8 @@ async def trades_pnl():
 
 
 @api.post("/trades/propose")
-async def trades_propose(body: ProposeInput):
+async def trades_propose(body: ProposeInput, user: dict = Depends(platform_guard)):
+    require_advanced(user)
     res = await trade_engine.propose(body.symbol, body.timeframe)
     if not res.get("ok"):
         raise HTTPException(400, res.get("error", "Could not build a proposal."))
@@ -87,7 +89,8 @@ async def trades_proposals(limit: int = 50):
 
 
 @api.post("/trades/proposals/{pid}/approve")
-async def trades_approve(pid: str):
+async def trades_approve(pid: str, user: dict = Depends(platform_guard)):
+    require_advanced(user)
     res = await trade_engine.approve(pid)
     if not res.get("ok"):
         raise HTTPException(400, res.get("error", "Approval failed."))
@@ -95,7 +98,8 @@ async def trades_approve(pid: str):
 
 
 @api.post("/trades/proposals/{pid}/reject")
-async def trades_reject(pid: str):
+async def trades_reject(pid: str, user: dict = Depends(platform_guard)):
+    require_advanced(user)
     res = await trade_engine.reject(pid)
     if not res.get("ok"):
         raise HTTPException(400, res.get("error", "Reject failed."))
@@ -113,7 +117,8 @@ async def trades_log(limit: int = 50):
 
 
 @api.post("/trades/positions/{position_id}/close")
-async def trades_close(position_id: str):
+async def trades_close(position_id: str, user: dict = Depends(platform_guard)):
+    require_advanced(user)
     res = await trade_engine.close(position_id)
     if not res.get("ok"):
         raise HTTPException(400, res.get("error", "Close failed."))

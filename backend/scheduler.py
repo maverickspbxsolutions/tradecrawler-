@@ -41,6 +41,16 @@ async def _loop():
         await asyncio.sleep(POLL_SECONDS)
 
 
+async def _license_loop():
+    import licensing
+    while True:
+        try:
+            await licensing.refresh_statuses()
+        except Exception as e:  # noqa
+            logger.warning(f"License refresh error: {e}")
+        await asyncio.sleep(3600)  # check hourly; flips at expiry / +7d
+
+
 async def _evolve_loop():
     from evolution import evolve_strategy
     await asyncio.sleep(EVOLVE_SECONDS)
@@ -93,4 +103,5 @@ def start_scheduler():
         _scan_task = asyncio.create_task(_scan_loop())
     if _candle_task is None:
         _candle_task = asyncio.create_task(_candle_loop())
+    asyncio.create_task(_license_loop())
     return _task

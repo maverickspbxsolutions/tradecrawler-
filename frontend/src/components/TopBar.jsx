@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { SpiderIcon } from "@/components/SpiderIcon";
 import { Button } from "@/components/ui/button";
+import { AdminKeys } from "@/components/AdminKeys";
 
 export function TopBar({ onOpenSettings }) {
   const { user, logout } = useAuth();
@@ -65,6 +66,7 @@ export function TopBar({ onOpenSettings }) {
           >
             <Settings className="h-4 w-4" />
           </Button>
+          {user?.license?.is_admin && <AdminKeys />}
           <div className="hidden sm:block text-xs text-muted-foreground font-mono">{user?.username}</div>
           <Button
             variant="outline"

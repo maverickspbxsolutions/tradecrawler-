@@ -46,14 +46,19 @@ async def seed_admin():
         await db.users.insert_one({
             "id": str(uuid.uuid4()),
             "username": username,
+            "email": username,
+            "role": "admin",
             "password_hash": hash_password(password),
             "created_at": datetime.now(timezone.utc).isoformat(),
         })
-    elif not verify_password(password, existing["password_hash"]):
-        await db.users.update_one(
-            {"username": username},
-            {"$set": {"password_hash": hash_password(password)}},
-        )
+    else:
+        upd = {}
+        if not verify_password(password, existing["password_hash"]):
+            upd["password_hash"] = hash_password(password)
+        if existing.get("role") != "admin":
+            upd["role"] = "admin"
+        if upd:
+            await db.users.update_one({"username": username}, {"$set": upd})
 
 
 async def get_current_user(request: Request) -> dict:
@@ -78,15 +83,49 @@ class LoginInput(BaseModel):
     password: str
 
 
+class RegisterInput(BaseModel):
+    email: str
+    password: str
+    license_key: str
+
+
+def _user_public(user: dict) -> dict:
+    from licensing import license_view
+    return {"id": user["id"], "username": user["username"],
+            "email": user.get("email"), "role": user.get("role", "user"),
+            "license": license_view(user)}
+
+
+@auth_router.post("/register")
+async def register(body: RegisterInput):
+    import licensing
+    email = body.email.strip().lower()
+    if "@" not in email or len(body.password) < 6:
+        raise HTTPException(status_code=400, detail="Enter a valid email and a password of at least 6 characters.")
+    if await db.users.find_one({"username": email}):
+        raise HTTPException(status_code=400, detail="An account with this email already exists. Please log in.")
+    uid = str(uuid.uuid4())
+    user = {"id": uid, "username": email, "email": email, "role": "user",
+            "password_hash": hash_password(body.password),
+            "created_at": datetime.now(timezone.utc).isoformat(), "tier": None}
+    await db.users.insert_one(user)
+    fresh = await licensing._redeem(user, body.license_key)  # validates + activates (or raises)
+    token = create_access_token(uid, email)
+    return {"token": token, "user": _user_public(fresh)}
+
+
 @auth_router.post("/login")
 async def login(body: LoginInput):
-    user = await db.users.find_one({"username": body.username.strip()})
+    ident = body.username.strip()
+    user = await db.users.find_one({"username": ident}) or \
+        await db.users.find_one({"username": ident.lower()}) or \
+        await db.users.find_one({"email": ident.lower()})
     if not user or not verify_password(body.password, user["password_hash"]):
-        raise HTTPException(status_code=401, detail="Invalid username or password")
+        raise HTTPException(status_code=401, detail="Invalid email/username or password")
     token = create_access_token(user["id"], user["username"])
-    return {"token": token, "user": {"id": user["id"], "username": user["username"]}}
+    return {"token": token, "user": _user_public(user)}
 
 
 @auth_router.get("/me")
 async def me(user: dict = Depends(get_current_user)):
-    return user
+    return _user_public(user)

@@ -23,6 +23,9 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="Crypto Signal Terminal")
 
 app.include_router(auth_router)
+from licensing import admin_router, acct_router
+app.include_router(admin_router)
+app.include_router(acct_router)
 app.include_router(api)
 
 app.add_middleware(

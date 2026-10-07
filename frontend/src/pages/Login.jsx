@@ -12,9 +12,12 @@ const HERO =
   "https://images.unsplash.com/photo-1763888450809-4125d93fa56b?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2OTF8MHwxfHNlYXJjaHwxfHxhYnN0cmFjdCUyMHRyYWRpbmclMjBjaGFydCUyMGRhcmslMjBiYWNrZ3JvdW5kfGVufDB8fHx8MTc5MTA1MDI3NXww&ixlib=rb-4.1.0&q=85";
 
 export default function Login() {
-  const { login } = useAuth();
+  const { login, register } = useAuth();
   const navigate = useNavigate();
+  const [mode, setMode] = useState("login"); // login | register
   const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
+  const [licenseKey, setLicenseKey] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -24,10 +27,14 @@ export default function Login() {
     setError("");
     setLoading(true);
     try {
-      await login(username, password);
+      if (mode === "register") {
+        await register(email, password, licenseKey);
+      } else {
+        await login(username, password);
+      }
       navigate("/");
     } catch (err) {
-      setError(formatApiErrorDetail(err.response?.data?.detail) || "Login failed");
+      setError(formatApiErrorDetail(err.response?.data?.detail) || "Something went wrong");
     } finally {
       setLoading(false);
     }
@@ -62,23 +69,44 @@ export default function Login() {
           </div>
 
           <div className="space-y-4">
-            <div>
-              <Label className="text-[10px] font-mono uppercase text-muted-foreground">Username</Label>
-              <Input
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                autoComplete="username"
-                className="h-10 rounded-sm mt-1"
-                data-testid="username-input"
-              />
+            <div className="grid grid-cols-2 gap-1 p-1 bg-muted/40 rounded-sm mb-1">
+              {["login", "register"].map((m) => (
+                <button key={m} type="button" onClick={() => { setMode(m); setError(""); }}
+                  data-testid={`tab-${m}`}
+                  className={`py-1.5 rounded-sm text-xs font-mono uppercase tracking-wider transition-colors ${
+                    mode === m ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>
+                  {m === "login" ? "Sign in" : "Activate key"}
+                </button>
+              ))}
             </div>
+
+            {mode === "login" ? (
+              <div>
+                <Label className="text-[10px] font-mono uppercase text-muted-foreground">Email or Username</Label>
+                <Input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username"
+                  className="h-10 rounded-sm mt-1" data-testid="username-input" />
+              </div>
+            ) : (
+              <>
+                <div>
+                  <Label className="text-[10px] font-mono uppercase text-muted-foreground">Email (where alerts are sent)</Label>
+                  <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email"
+                    className="h-10 rounded-sm mt-1" data-testid="email-input" />
+                </div>
+                <div>
+                  <Label className="text-[10px] font-mono uppercase text-muted-foreground">License Key</Label>
+                  <Input value={licenseKey} onChange={(e) => setLicenseKey(e.target.value.toUpperCase())}
+                    placeholder="TC-XXXX-XXXX-XXXX-XXXX" className="h-10 rounded-sm mt-1 font-mono" data-testid="license-input" />
+                </div>
+              </>
+            )}
             <div>
               <Label className="text-[10px] font-mono uppercase text-muted-foreground">Password</Label>
               <Input
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                autoComplete="current-password"
+                autoComplete={mode === "register" ? "new-password" : "current-password"}
                 className="h-10 rounded-sm mt-1"
                 data-testid="password-input"
               />
@@ -96,7 +124,7 @@ export default function Login() {
               className="w-full h-10 rounded-sm bg-primary text-primary-foreground hover:bg-primary/90 font-medium"
               data-testid="login-submit-btn"
             >
-              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Enter Terminal"}
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : mode === "register" ? "Activate & Enter" : "Enter Terminal"}
             </Button>
           </div>
 
