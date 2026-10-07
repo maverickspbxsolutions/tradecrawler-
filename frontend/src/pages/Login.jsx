@@ -3,13 +3,11 @@ import { useNavigate } from "react-router-dom";
 import { Loader2, TriangleAlert } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { SpiderIcon } from "@/components/SpiderIcon";
+import { LandingChart } from "@/components/LandingChart";
 import { formatApiErrorDetail } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-
-const HERO =
-  "https://images.unsplash.com/photo-1763888450809-4125d93fa56b?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2OTF8MHwxfHNlYXJjaHwxfHxhYnN0cmFjdCUyMHRyYWRpbmclMjBjaGFydCUyMGRhcmslMjBiYWNrZ3JvdW5kfGVufDB8fHx8MTc5MTA1MDI3NXww&ixlib=rb-4.1.0&q=85";
 
 export default function Login() {
   const { login, register } = useAuth();
@@ -42,10 +40,12 @@ export default function Login() {
 
   return (
     <div className="min-h-screen grid lg:grid-cols-2 bg-background">
-      <div className="relative hidden lg:block overflow-hidden border-r border-border/60">
-        <img src={HERO} alt="" className="absolute inset-0 h-full w-full object-cover opacity-60" />
-        <div className="absolute inset-0 bg-gradient-to-t from-background via-background/40 to-transparent" />
-        <div className="absolute bottom-0 left-0 p-10">
+      <div className="relative hidden lg:block overflow-hidden border-r border-border/60 bg-background">
+        <div className="absolute inset-0 opacity-70">
+          <LandingChart />
+        </div>
+        <div className="absolute inset-0 bg-gradient-to-t from-background via-background/50 to-transparent pointer-events-none" />
+        <div className="absolute bottom-0 left-0 p-10 pointer-events-none">
           <div className="text-xs font-mono uppercase tracking-[0.25em] text-primary mb-3">crypto trade alerts · 24/7</div>
           <h1 className="text-4xl font-semibold tracking-tight leading-tight max-w-md">
             TradeCrawler finds the trade.<br />You just check your email.
