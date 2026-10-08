@@ -181,8 +181,15 @@ async def _scan_targets() -> list:
     plus the symbol of every strategy the user has turned on (enabled). All scanned
     on the intraday day-trading timeframe (30min-5h holds)."""
     tf = rc.TRADE_TIMEFRAME
+    # 24/7 synthetic indices trend strongly and never close, so the bot always has
+    # something to hunt even when Gold/BTC are choppy or the FX session is quiet.
     targets = [{"signal": "XAUUSD", "timeframe": tf, "label": "Gold"},
-               {"signal": "BTCUSD", "timeframe": tf, "label": "Bitcoin"}]
+               {"signal": "BTCUSD", "timeframe": tf, "label": "Bitcoin"},
+               {"signal": "R_75", "timeframe": tf, "label": "Volatility 75"},
+               {"signal": "R_100", "timeframe": tf, "label": "Volatility 100"},
+               {"signal": "R_50", "timeframe": tf, "label": "Volatility 50"},
+               {"signal": "R_25", "timeframe": tf, "label": "Volatility 25"},
+               {"signal": "R_10", "timeframe": tf, "label": "Volatility 10"}]
     seen = {mt5_trader.mt5_symbol(t["signal"]) for t in targets}
     strats = await db.strategies.find({"enabled": True}, {"_id": 0}).to_list(500)
     for s in strats:
@@ -480,9 +487,9 @@ async def _analyze(signal_symbol: str, timeframe: str, horizon: int) -> dict:
         sl, tp = round(price + sl_dist, d), round(price - tp_dist, d)
 
     pred = opt["pred"]
-    # reject slow setups: if the sim says it'd take ~the whole max-hold window to
-    # resolve, it'll drag for hours — skip it in favour of a faster one.
-    if pred["est_hold_bars"] >= horizon * 0.9:
+    # reject only genuinely slow setups: if the sim says it rarely resolves within
+    # the whole max-hold window, it'll drag for hours — skip it for a faster one.
+    if pred["est_hold_bars"] >= horizon:
         return {"ok": False, "mt5_symbol": mt5_sym, "direction": direction, "side": side,
                 "confidence": int(conf), "regime": ev.get("regime"), "score": ev.get("score"),
                 "reason": (f"{'Buy' if side == 'BUY' else 'Sell'} setup would likely drag on for hours before "
@@ -582,15 +589,25 @@ async def propose(signal_symbol: str, timeframe: str = None) -> dict:
     else:
         sl, tp = round(price + sl_dist, d), round(price - tp_dist, d)
 
-    desired_lot = rc.confidence_lot(a["confidence"])
-    lot, est_risk, vpu = _clamp_lot(spec, desired_lot, sl_dist)
-    # logical growth guard: never risk more than RISK_CAP_PCT of equity per trade
+    # ---- goal-aware sizing: risk a % of the CURRENT balance, paced toward the 2x goal ----
     capped_note = ""
     try:
         acct = await account_summary()
-        equity = acct.get("equity") or acct.get("balance") if acct.get("available") else None
+        avail = acct.get("available")
+        balance = (acct.get("balance") or acct.get("equity")) if avail else None
+        growth = acct.get("growth") or {}
     except Exception:  # noqa
-        equity = None
+        balance, growth = None, {}
+    vpu = _value_per_unit(spec)
+    if balance and vpu and sl_dist > 0:
+        risk_pct = rc.risk_pct_for(a["confidence"], growth.get("growth_pct"))
+        risk_usd = float(balance) * risk_pct
+        desired_lot = risk_usd / (sl_dist * vpu)
+    else:
+        desired_lot = rc.confidence_lot(a["confidence"])  # fallback if balance unreadable
+    lot, est_risk, vpu = _clamp_lot(spec, desired_lot, sl_dist)
+    # hard safety ceiling: never risk more than RISK_CAP_PCT of equity on one trade
+    equity = (acct.get("equity") or acct.get("balance")) if (balance is not None) else None
     if equity:
         safe_lot = _cap_lot_to_risk(spec, lot, sl_dist, equity)
         if safe_lot < lot:
@@ -659,6 +676,23 @@ async def auto_scan() -> dict:
     if not _is_demo(info):  # safety: never auto-hunt on a live account
         return {"created": 0, "reason": "not demo"}
 
+    # stop hunting once the demo balance has doubled (goal reached) — protect it.
+    # Also: if the account has been drawn down to a fraction of the goal's starting
+    # balance (effectively blown), keep EMAILING ideas but auto-pause auto-placing
+    # so nothing auto-trades a near-empty account. Resumes once the balance is reset.
+    tiny_balance = False
+    try:
+        acct = await account_summary()
+        g = acct.get("growth") or {}
+        if g.get("goal_reached"):
+            return {"created": 0, "reason": "goal reached — balance doubled; pausing new trades"}
+        bal = acct.get("balance") or acct.get("equity")
+        start = g.get("start_balance")
+        if bal and start and float(bal) < float(start) * 0.25:
+            tiny_balance = True
+    except Exception:  # noqa
+        pass
+
     now = _now()
     pend = await db.trade_proposals.find(
         {"status": "pending"}, {"_id": 0, "mt5_symbol": 1, "expires_at": 1}).to_list(200)
@@ -683,16 +717,21 @@ async def auto_scan() -> dict:
             created += 1
             p = res["proposal"]
             logger.info(f"auto_scan: queued {p['side']} {m}")
-            # Auto-approve mode: place the strongest setups automatically (demo only).
-            if cfg["auto_approve"] and (p.get("win_prob") or 0) >= cfg["auto_approve_min_winprob"]:
+            # Hybrid: auto-place the highest-conviction setups (demo only); email the
+            # rest as proposals for the user to approve.
+            placed = False
+            if cfg["auto_approve"] and not tiny_balance and (p.get("win_prob") or 0) >= cfg["auto_approve_min_winprob"]:
                 try:
                     ap = await approve(p["id"])
-                    logger.info(f"auto_scan: AUTO-APPROVED {p['side']} {m} -> {ap.get('ok')}")
+                    placed = bool(ap.get("ok"))
+                    if placed and ap.get("proposal"):
+                        p = ap["proposal"]
+                    logger.info(f"auto_scan: AUTO-PLACED {p['side']} {m} -> {placed}")
                 except Exception as e:  # noqa
                     logger.warning(f"auto_scan auto-approve failed: {e}")
             try:
                 import alerts
-                await alerts.email_proposal(p)
+                await alerts.email_proposal(p, auto_placed=placed)
             except Exception as e:  # noqa
                 logger.warning(f"auto_scan email failed: {e}")
     return {"created": created}

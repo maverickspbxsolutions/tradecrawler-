@@ -11,15 +11,15 @@ import pandas as pd
 import indicators as ind
 
 MIN_SCORE = 60          # composite confluence score required to trade
-ADX_TREND = 25.0        # strong trend (momentum regime)
-ADX_CHOP = 18.0         # (legacy) kept for reference
-VR_PERSIST = 1.05       # variance ratio > this => trending/persistent
-VR_REVERT = 0.92        # variance ratio < this => mean-reverting
+ADX_TREND = 22.0        # trend strong enough for the momentum regime
+VR_PERSIST = 1.0        # variance ratio >= this => trending/persistent
+VR_REVERT = 0.95        # variance ratio <= this => mean-reverting
 RSI_FADE_LO = 33.0      # fade long when RSI <= this in a reversion regime
 RSI_FADE_HI = 67.0      # fade short when RSI >= this in a reversion regime
 
 # ---- entry timing (don't chase; get in near value) ----
 EXT_MAX_ATR = 2.2       # price this many ATRs past the average = overextended -> wait
+VALUE_ZONE_ATR = 1.4    # within this many ATRs of the average = fine to trade with the trend
 PULLBACK_ZONE_ATR = 0.8 # a recent bar within this many ATRs of the average = a real pullback
 SWING_LOOKBACK = 5      # bars used to find the pullback/swing for a tight stop
 SWING_BUF_ATR = 0.25    # place the stop this far beyond the swing
@@ -107,10 +107,10 @@ def assess(candles: list, htf_dir: str | None = None) -> dict:
         vol_ratio = float(vol.iloc[-3:].mean()) / float(vol.iloc[-20:].mean())
 
     # ---- regime ----
-    # momentum = strong trend + persistent (or a very strong trend even if VR is
-    # neutral); reversion = anti-persistent and not strongly trending (no
-    # dead-zone in the ADX 18-25 band); otherwise chop.
-    if (adx >= ADX_TREND and vr >= VR_PERSIST) or (adx >= 35 and vr >= 0.98):
+    # momentum = a decent trend that's also persistent, or a strong trend even if
+    # VR is neutral; reversion = anti-persistent and not strongly trending.
+    # Only genuinely directionless markets fall through to "chop".
+    if (adx >= ADX_TREND and vr >= VR_PERSIST) or (adx >= 30 and vr >= 0.97):
         regime = "momentum"
     elif vr <= VR_REVERT and adx < ADX_TREND:
         regime = "reversion"
@@ -151,6 +151,7 @@ def assess(candles: list, htf_dir: str | None = None) -> dict:
                     "reason": "The trend has run too far from its average — waiting for a pullback to get in at a better price."}
         pullback_resume = ext_min <= PULLBACK_ZONE_ATR and resuming
         breakout = squeeze_release and resuming
+        in_value = ext_now <= VALUE_ZONE_ATR          # not extended -> fine to join the trend
         if pullback_resume:
             trigger = "Pulled back to value, turning back " + ("up" if up else "down")
             score += 14
@@ -160,10 +161,14 @@ def assess(candles: list, htf_dir: str | None = None) -> dict:
             trigger = "Fresh breakout after a quiet stretch"
             score += 10
             reasons.append("Price just broke out after a calm stretch — getting in early on the move.")
+        elif in_value:
+            trigger = "Trading with the trend, near fair value"
+            score += 6
+            reasons.append("Price is still near its average, so we're joining the trend without chasing.")
         else:
             return {"tradeable": False, "regime": regime, "regime_label": regime_label, "adx": round(adx),
                     "direction": direction, "side": "BUY" if up else "SELL", "score": score,
-                    "reason": "The trend's there, but it's not a good spot to get in yet — waiting for a pullback or a fresh breakout."}
+                    "reason": "The trend's a bit extended here — waiting for a small pullback to get in at a better price."}
         swing_dist = _swing_stop_dist(high, low, price, up, atr_v)
     else:  # range-bound — buy dips / sell spikes back toward the average
         regime_label = "Range-bound"

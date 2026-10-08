@@ -359,3 +359,27 @@ User: live/deployed site shows a blank white screen right after the latest deplo
 - Ruled out code side: `yarn build` compiles clean (main ~345kB gz); served build index.html=200, main.js=200; App.js is a standard BrowserRouter SPA; preview dev build renders with no console errors.
 - Applied mitigation: throttled chatty MetaApi socket.io/engineio/httpx loggers to WARNING in server.py (they logged a line PER price tick -> backend.err.log grew ~13MB in minutes; on a small prod pod this pressures memory and could crash-loop -> blank page). Verified logs now sparse after restart.
 - Routed to deployment diagnostics (emergent__send_to_deployer, intent=debug) to check: deploy success / stale-build serving / index.html fallback, live backend pod health (520/OOM/restarts), baked REACT_APP_BACKEND_URL, and the known MetaApi demo-account contention (shared preview/prod token). RCA pending (async).
+
+## Deployed white-screen — RESOLVED (2026-06)
+Deployer RCA: live infra fully healthy (build served, assets 200, /api 200, backend up, URL baked) => blank page was a CLIENT-SIDE throw in the bundle.
+Root cause: lightweight-charts createChart() uses Intl with the env locale; an invalid locale tag (e.g. "en-US@posix") throws during render. Landing page mounts the chart immediately and there is NO error boundary -> the throw blanks the whole React tree (white screen). The deployed bundle predated the locale fix.
+Fix (already in preview source, now shipped via green redeploy): `localization:{locale:"en-US"}` pinned in Candlestick.jsx + LandingChart.jsx. Also shipped: server.py throttles socket.io/engineio/httpx loggers to WARNING.
+VERIFIED on https://tradecrawler.live: /login renders (animated candles + form, 0 console errors); after admin login the dashboard renders fully (BODY_LEN 8714, all panels), 0 console/page errors.
+NOTE: app has no React error boundary — a single chart/render throw blanks everything. Consider adding one as cheap insurance.
+
+## Trade-finding revival + balance-aware goal engine (2026-06)
+Problem: bot went silent (no trades/emails for a long time). Root cause: my entry-timing tightening + the ADX18-25/VR0.92-1.05 "chop" dead-zone rejected ~everything, and only 3 symbols were hunted.
+Fixes (all verified):
+- edge.py: regime thresholds loosened — momentum=(adx>=22 & vr>=1.0) or (adx>=30 & vr>=0.97); reversion=(vr<=0.95 & adx<22). Momentum timing adds an IN-VALUE entry (ext<=1.4 ATR from EMA -> join trend without chasing) alongside pullback-resume/breakout. VALUE_ZONE_ATR=1.4.
+- trade_engine._scan_targets: broadened Gold+BTC -> + Volatility 75/100/50/25/10 (24/7 synthetics). Slow-setup filter relaxed (est_hold_bars>=horizon only).
+- Walk-forward over last 120 bars: tradeable bars XAU 7, BTC 18, V75 12, V100 5, V50 39, V25 12 (was ~0). Healthy cadence across 6 symbols scanned every 90s.
+- risk_config.risk_pct_for(confidence, growth_pct): size by 1-5% of CURRENT balance, paced down near the 2x goal (x0.8/0.6/0.4 at 40/60/80%). NOT martingale. RISK_CAP_PCT=20% hard ceiling retained.
+- trade_engine.propose: sizing now balance-% based (falls back to confidence_lot if balance unreadable). auto_scan: pauses when growth.goal_reached; HYBRID auto-place win_prob>=0.80 (settings auto_approve=True, min 0.80) and emails all proposals.
+- alerts.email_proposal(prop, auto_placed): auto-placed emails say "ALREADY PLACED" (green), others "APPROVE/REJECT". server logging throttled earlier.
+CRITICAL: demo account balance read = ~$92 (equity $86), but goal start_balance captured earlier = $9961 (target $19922). Account was drawn down by earlier trading. Goal is stale/meaningless at $92. AWAITING USER: re-anchor goal to current balance and/or reset the Deriv demo balance.
+
+### VERIFIED (same session)
+- Live auto_scan queued BUY XAUUSD + SELL BTCUSD; both emailed (Resend email_ids returned to delivered@resend.dev). Email pipeline healthy.
+- New proposals sized by balance-% -> 0.08-0.25 lots on the $92 demo (was fixed ~6.0). Confirms goal-aware sizing active.
+- Recent win_probs 0.47-0.62 (< 0.80) -> emailed for approval, none auto-placed. Tiny-balance guard (bal < 25% of goal start) auto-pauses auto-placing on the near-empty account; resumes when balance reset. Goal left anchored at ~$9961 (correct once user resets Deriv demo to ~$10k).
+- MetaApi TooManyRequests / KeyError('type') still appear intermittently (SDK-internal, shared preview/prod demo account) — operational, non-fatal; scan still functions.

@@ -42,10 +42,36 @@ MIN_CONFIDENCE = 58
 MIN_WIN_PROB = 0.45          # breakeven for a 1.5 reward:risk is ~0.40
 MIN_EXPECTED_R = 0.05        # expected value must beat 0.05R
 
-# Growth guard: however big the confidence-scaled lot is, never risk more than
-# this fraction of equity on a single trade. Doubling the balance requires
-# surviving losers — a trade that risks half the account is not "logical growth".
+# Growth guard: however big the sized lot is, never risk more than this fraction
+# of equity on a single trade.
 RISK_CAP_PCT = 0.20
+
+# ---- goal-aware money management (risk a % of the CURRENT balance per trade) ----
+# Size grows as the balance grows and shrinks on drawdown. Confidence scales the
+# risk within [MIN..MAX]; risk is PACED DOWN as the balance nears the 2x goal to
+# protect gains. NOT martingale — losses never increase the next trade's risk.
+RISK_PCT_MIN = 0.01          # 1% of balance at the minimum tradeable confidence
+RISK_PCT_MAX = 0.05          # 5% of balance at full confidence
+
+
+def risk_pct_for(confidence, growth_pct=None) -> float:
+    """Fraction of current balance to risk on one trade, from confidence, paced
+    down as progress toward the 2x goal rises."""
+    try:
+        conf = float(confidence)
+    except (TypeError, ValueError):
+        conf = MIN_CONFIDENCE
+    frac = (conf - MIN_CONFIDENCE) / max(1.0, 100.0 - MIN_CONFIDENCE)
+    frac = max(0.0, min(1.0, frac))
+    pct = RISK_PCT_MIN + frac * (RISK_PCT_MAX - RISK_PCT_MIN)
+    g = max(0.0, min(100.0, float(growth_pct or 0)))   # protect gains near the goal
+    if g >= 80:
+        pct *= 0.4
+    elif g >= 60:
+        pct *= 0.6
+    elif g >= 40:
+        pct *= 0.8
+    return round(max(RISK_PCT_MIN * 0.3, min(pct, RISK_CAP_PCT)), 4)
 
 # Forward Monte-Carlo prediction settings. Tuned for intraday day-trading:
 # 15-minute bars with a 20-bar (~5 hour) max horizon. Profit/odds are measured

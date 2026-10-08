@@ -235,8 +235,8 @@ async def get_settings() -> dict:
             "min_minutes_between_same_strategy": 15,
             "trade_timeframe": "15m",
             "max_hold_hours": 5,
-            "auto_approve": False,
-            "auto_approve_min_winprob": 0.85,
+            "auto_approve": True,
+            "auto_approve_min_winprob": 0.80,
             "trailing_enabled": True,
         }
         await db.settings.insert_one(dict(s))
@@ -256,7 +256,7 @@ def _recipients(settings: dict) -> list:
     return [e.strip() for e in emails if e and e.strip()]
 
 
-def _proposal_html(prop: dict) -> str:
+def _proposal_html(prop: dict, auto_placed: bool = False) -> str:
     side = prop.get("side")
     is_buy = side == "BUY"
     color = "#00E676" if is_buy else "#FF3366"
@@ -286,11 +286,23 @@ def _proposal_html(prop: dict) -> str:
     risk_line = (f'<p style="font-size:15px;margin:2px 0">Sized to risk about '
                  f'<strong>${risk:,.2f}</strong> if the stop-loss hits.</p>') if risk is not None else ""
 
+    if auto_placed:
+        cta = ('High-conviction setup &mdash; the crawler has ALREADY PLACED this demo trade for you. '
+               'Open TradeCrawler to watch or close it early.')
+        cta_bg = "#00E676"
+        foot = ('DEMO ACCOUNT &middot; VIRTUAL FUNDS &middot; NOT FINANCIAL ADVICE &middot; '
+                'AUTO-PLACED (high conviction) &mdash; manage it in the app')
+    else:
+        cta = 'Open TradeCrawler to APPROVE or REJECT this trade'
+        cta_bg = "#00E5FF"
+        foot = ('DEMO ACCOUNT &middot; VIRTUAL FUNDS &middot; NOT FINANCIAL ADVICE &middot; '
+                'NO ORDER IS PLACED WITHOUT YOUR APPROVAL')
+
     return (
         f'<table role="presentation" width="100%" style="background:#0A0A0C;padding:24px">'
         f'<tr><td style="font-family:Arial,sans-serif;color:#EDEDED">'
         f'<p style="font-size:12px;letter-spacing:2px;color:#8A8A93;text-transform:uppercase">'
-        f'{escape(EMAIL_FROM_NAME)} &middot; Demo Trade Idea</p>'
+        f'{escape(EMAIL_FROM_NAME)} &middot; {"Demo Trade Placed" if auto_placed else "Demo Trade Idea"}</p>'
         f'<h1 style="color:{color};margin:8px 0;font-size:30px">{escape(side)} {sym}</h1>'
         f'<p style="font-size:15px;margin:6px 0">{headline}</p>'
         f'<p style="font-size:16px;margin:14px 0 4px"><strong>The plan:</strong></p>'
@@ -301,20 +313,21 @@ def _proposal_html(prop: dict) -> str:
         f'Stop-loss: <strong style="color:#FF3366">{sl:,.4f}</strong>.</p>'
         f'<p style="font-size:15px;margin:2px 0">Confidence <strong>{conf}%</strong>.</p>'
         f'{win_line}{hold_line}{risk_line}'
-        f'<div style="background:#00E5FF;color:#000;padding:12px;font-size:14px;'
+        f'<div style="background:{cta_bg};color:#000;padding:12px;font-size:14px;'
         f'font-weight:bold;margin-top:16px;text-align:center;border-radius:6px">'
-        f'Open TradeCrawler to APPROVE or REJECT this trade</div>'
+        f'{cta}</div>'
         f'<div style="background:#FFE600;color:#000;padding:10px;font-size:11px;'
         f'font-weight:bold;letter-spacing:1px;margin-top:14px;text-align:center">'
-        f'DEMO ACCOUNT &middot; VIRTUAL FUNDS &middot; NOT FINANCIAL ADVICE &middot; NO ORDER IS PLACED WITHOUT YOUR APPROVAL</div>'
+        f'{foot}</div>'
         f'<p style="font-size:11px;color:#565660;margin-top:16px">Sent by {escape(EMAIL_FROM_NAME)}. '
         f'We never ask for your password or payment details by email.</p>'
         f'</td></tr></table>'
     )
 
 
-async def email_proposal(prop: dict) -> dict:
+async def email_proposal(prop: dict, auto_placed: bool = False) -> dict:
     """Email the user when the bot finds a new BUY or SELL trade idea (demo).
+    `auto_placed` => the bot already executed it (hybrid high-conviction mode).
     Respects recipients, a per-symbol+side cooldown, and the daily cap."""
     settings = await get_settings()
     recipients = _recipients(settings)
@@ -334,8 +347,11 @@ async def email_proposal(prop: dict) -> dict:
         return {"sent": False, "reason": "daily cap"}
 
     try:
-        subject = f"[{prop['side']}] {prop['mt5_symbol']} — TradeCrawler found a trade (approve in app)"
-        email_id = await send_email(to=recipients, subject=subject, html=_proposal_html(prop))
+        verb = "PLACED" if auto_placed else "found"
+        subject = (f"[{prop['side']}] {prop['mt5_symbol']} — TradeCrawler {verb} a trade"
+                   + ("" if auto_placed else " (approve in app)"))
+        email_id = await send_email(to=recipients, subject=subject,
+                                    html=_proposal_html(prop, auto_placed=auto_placed))
         await db.alerts.insert_one({
             "idempotency_key": f"{key}:{prop.get('id')}",
             "proposal_id": prop.get("id"),
