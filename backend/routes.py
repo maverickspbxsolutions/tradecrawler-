@@ -596,7 +596,9 @@ async def test_alert():
     try:
         email_id = await send_email(to=recipients, subject="TradeCrawler test alert", html=html)
     except Exception as e:  # noqa
-        raise HTTPException(502, f"Email failed: {e}")
+        # Return 200 with the real reason — a raised 502 gets masked by the CDN's
+        # error page, hiding why the send failed (e.g. Resend sender/domain issue).
+        return {"sent": False, "error": str(e), "recipients": recipients}
     return {"sent": True, "email_id": email_id, "recipients": recipients}
 
 
