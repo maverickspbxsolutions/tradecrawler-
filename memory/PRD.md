@@ -345,3 +345,11 @@ User: "bot spots trends but needs better entry timing — narrow the best buy/se
   - `_optimize_levels(..., swing_dist)`: when a well-timed entry has a swing, stop = just beyond swing, clamped to [0.6*ATR .. ATR-stop] (tighter, better-placed -> higher R:R). Falls back to 1.3*ATR stop otherwise.
   - `_analyze`: passes ev.swing_stop_dist; SLOW-SETUP FILTER — if sim median time-to-resolve (est_hold_bars) >= 90% of the max-hold horizon, reject ("would drag on for hours — skipping for a faster one"). Surfaces `trigger` in base + success reason ("Entry: pulled back to value...") + scan_status rows + proposal.
 - VERIFIED: backend imports clean; live /api/trades/scan-status now shows Gold/BTC trending but "waiting for a pullback or a fresh breakout" (no more chasing). Synthetic unit tests: pullback-resume -> tradeable BUY, trigger set, tight swing stop (1.56), score 79; overextended -> waits. Net effect: fewer, better-timed trades, shorter time-in-trade. Not run through testing_agent (change is deterministic read-only decision logic; MetaApi placement unchanged).
+
+## Instant Deriv data refresh — stale-while-revalidate (2026-06)
+User: "Deriv data should refresh instantaneous, it delays too long sometimes."
+Root cause: get_live did TWO sequential MetaApi RPCs (live_price 10s + candles 12s) and get_candles blocked up to 18s on cache expiry — so a slow MT5 RPC froze every poll.
+- market_data.py get_live -> SWR + parallel: serves last tick from cache instantly, triggers a NON-blocking background refresh when stale (>2s); refresh runs live_price + candles via asyncio.gather (timeouts 6s/8s). Only a true cold start does one blocking fetch for first paint. _LIVE_TTL 3->2.
+- market_data.py get_candles -> SWR: always returns warm cache (memory, else DB) instantly and refreshes in background (_trigger_candle_refresh/_refresh_candles + _candles_refreshing guard). Blocking fetch only on true cold start (no memory+no DB).
+- PriceChart.jsx live poll 3000ms -> 2000ms (backend now non-blocking so cheap).
+- VERIFIED via curl: cold start live ~3.6s once; every warm poll ~0.1s (live) / ~0.09s (candles); Volatility100 price advanced 612.165->612.065->612.445 across polls (background refresh live). No more multi-second stalls.

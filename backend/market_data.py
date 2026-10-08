@@ -128,6 +128,7 @@ _CACHE_TTL = 15              # seconds a fresh in-memory candle set is reused
 _STORE_MAX = 500            # how many candles we keep warm per symbol/timeframe
 _recent: dict = {}          # mkey -> {"symbol","timeframe","msym","ts"} viewed recently
 _RECENT_TTL = 900           # keep warming a chart for 15 min after last view
+_candles_refreshing: set = set()   # mkeys with an in-flight background refresh
 
 # source health: {"last_ok": ts, "source": str, "error": str|None}
 health = {"last_ok": None, "source": "deriv-mt5", "error": None}
@@ -160,10 +161,36 @@ async def _fetch_mt5(msym: str, timeframe: str) -> list:
     return rows or []
 
 
+async def _refresh_candles(mkey: str, msym: str, timeframe: str):
+    """Background candle refresh (never blocks a request)."""
+    try:
+        rows = await _fetch_mt5(msym, timeframe)
+        if rows:
+            _cache[mkey] = (time.time(), rows)
+            await _db_save(mkey, msym, timeframe, rows)
+    except Exception as e:  # noqa
+        logger.warning(f"candle refresh {msym} {timeframe}: {e}")
+        mt5_trader.ensure_bg()
+    finally:
+        _candles_refreshing.discard(mkey)
+
+
+def _trigger_candle_refresh(mkey: str, msym: str, timeframe: str):
+    """Kick off a non-blocking refresh if MT5 is ready and none is in flight."""
+    if not mt5_trader.is_ready():
+        mt5_trader.ensure_bg()
+        return
+    if mkey in _candles_refreshing:
+        return
+    _candles_refreshing.add(mkey)
+    asyncio.create_task(_refresh_candles(mkey, msym, timeframe))
+
+
 async def get_candles(symbol: str, timeframe: str, limit: int = 300, closed_only: bool = True):
     """Return closed candle dicts (ascending) from Deriv MT5 ONLY.
-    Serves instantly from the warm cache; keeps showing the last known MT5 data
-    during a brief reconnect; never falls back to any non-MT5 source."""
+    Stale-while-revalidate: always answer instantly from the warm cache and
+    refresh in the background, so a slow MT5 RPC never stalls the chart. Only a
+    true cold start (no warm data anywhere) does a blocking fetch."""
     if timeframe not in TIMEFRAMES:
         raise ValueError(f"Unsupported timeframe: {timeframe}")
 
@@ -175,12 +202,21 @@ async def get_candles(symbol: str, timeframe: str, limit: int = 300, closed_only
     now = time.time()
     _recent[mkey] = {"symbol": symbol, "timeframe": timeframe, "msym": msym, "ts": now}
 
-    # 1) fresh in-memory cache
+    # 1) in-memory warm cache — return instantly, refresh in the background if stale
     mc = _cache.get(mkey)
-    if mc and now - mc[0] < _CACHE_TTL:
+    if mc:
+        if now - mc[0] >= _CACHE_TTL:
+            _trigger_candle_refresh(mkey, msym, timeframe)
         return mc[1][-limit:]
 
-    # 2) live fetch when MT5 is ready
+    # 2) no memory cache — hydrate from DB instantly, then refresh in background
+    db_hit = await _db_load(mkey)
+    if db_hit:
+        _cache[mkey] = (db_hit[0], db_hit[1])
+        _trigger_candle_refresh(mkey, msym, timeframe)
+        return db_hit[1][-limit:]
+
+    # 3) cold start — nothing warm anywhere; one blocking fetch for first paint
     if mt5_trader.is_ready():
         try:
             rows = await _fetch_mt5(msym, timeframe)
@@ -190,61 +226,71 @@ async def get_candles(symbol: str, timeframe: str, limit: int = 300, closed_only
                 return rows[-limit:]
         except Exception as e:  # noqa
             logger.warning(f"MT5 candles failed {symbol}->{msym}: {e}")
-            mt5_trader.ensure_bg()
             health["error"] = str(e)
-    else:
-        mt5_trader.ensure_bg()
-
-    # 3) serve last-known data from memory, then DB (survives restarts / reconnects)
-    if mc:
-        return mc[1][-limit:]
-    db_hit = await _db_load(mkey)
-    if db_hit:
-        _cache[mkey] = (db_hit[0], db_hit[1])
-        return db_hit[1][-limit:]
-
+    mt5_trader.ensure_bg()
     raise DerivUnavailable(_deriv_msg(symbol))
 
 
 _live_cache: dict = {}
-_LIVE_TTL = 3  # seconds — near-real-time price/forming candle
+_LIVE_TTL = 2  # seconds — serve this fast from cache; refresh in the background
+_live_refreshing: set = set()
+
+
+async def _refresh_live(symbol: str, timeframe: str, key: str, msym: str):
+    """Fetch the latest tick + forming candle in parallel and update the cache.
+    Runs in the background so the HTTP poll never waits on a slow MT5 RPC."""
+    try:
+        lp, rows = await asyncio.gather(
+            asyncio.wait_for(mt5_trader.live_price(msym), 6),
+            asyncio.wait_for(mt5_trader.candles(msym, timeframe, 2, closed_only=False), 8),
+        )
+        candle = rows[-1] if rows else None
+        price = (lp or {}).get("price") or (candle["c"] if candle else None)
+        if candle and price is not None:
+            candle = {**candle, "c": price,
+                      "h": max(candle["h"], price), "l": min(candle["l"], price)}
+        if price is not None:
+            now = time.time()
+            _live_cache[key] = (now, {
+                "symbol": symbol, "timeframe": timeframe, "price": price,
+                "candle": candle, "source": "deriv-mt5", "available": True,
+                "server_ts": int(now * 1000)})
+            health.update({"last_ok": now, "source": "deriv-mt5", "error": None})
+    except Exception as e:  # noqa
+        logger.warning(f"MT5 live refresh failed {symbol}->{msym}: {e}")
+        mt5_trader.ensure_bg()
+    finally:
+        _live_refreshing.discard(key)
 
 
 async def get_live(symbol: str, timeframe: str):
-    """Current price + in-progress candle from Deriv MT5 ONLY. Short TTL."""
+    """Current price + in-progress candle from Deriv MT5 ONLY.
+    Stale-while-revalidate: returns the last tick instantly and refreshes in the
+    background, so the chart keeps polling snappily even if MT5 is slow."""
     if timeframe not in TIMEFRAMES:
         raise ValueError(f"Unsupported timeframe: {timeframe}")
     key = f"{symbol.upper()}:{timeframe}"
     now = time.time()
     cached = _live_cache.get(key)
-    if cached and now - cached[0] < _LIVE_TTL:
-        return cached[1]
-
     msym = mt5_ready_symbol(symbol)
-    if msym and mt5_trader.is_ready():
-        try:
-            lp = await asyncio.wait_for(mt5_trader.live_price(msym), 10)
-            rows = await asyncio.wait_for(
-                mt5_trader.candles(msym, timeframe, 2, closed_only=False), 12)
-            candle = rows[-1] if rows else None
-            price = lp.get("price") or (candle["c"] if candle else None)
-            if candle and price is not None:
-                candle = {**candle, "c": price,
-                          "h": max(candle["h"], price), "l": min(candle["l"], price)}
-            out = {"symbol": symbol, "timeframe": timeframe, "price": price,
-                   "candle": candle, "source": "deriv-mt5", "available": True,
-                   "server_ts": int(now * 1000)}
-            _live_cache[key] = (now, out)
-            return out
-        except Exception as e:  # noqa
-            logger.warning(f"MT5 live failed {symbol}->{msym}: {e}")
+    ready = bool(msym) and mt5_trader.is_ready()
+
+    if cached:
+        if now - cached[0] >= _LIVE_TTL and ready and key not in _live_refreshing:
+            _live_refreshing.add(key)
+            asyncio.create_task(_refresh_live(symbol, timeframe, key, msym))
+        elif not ready:
             mt5_trader.ensure_bg()
-            if cached:
-                return {**cached[1], "server_ts": int(now * 1000)}  # last known price, fresh ts
-    elif msym:
+        return {**cached[1], "server_ts": int(now * 1000)}
+
+    # cold start — one blocking fetch so the first paint has a price
+    if ready:
+        await _refresh_live(symbol, timeframe, key, msym)
+        hit = _live_cache.get(key)
+        if hit:
+            return hit[1]
+    else:
         mt5_trader.ensure_bg()
-        if cached:
-            return {**cached[1], "server_ts": int(now * 1000)}
 
     out = {"symbol": symbol, "timeframe": timeframe, "price": None, "candle": None,
            "source": None, "available": False,
