@@ -18,6 +18,12 @@ from scheduler import start_scheduler
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+# Quiet the very chatty MetaApi socket.io/engineio stream + HTTP client loggers.
+# At INFO they emit a line per price tick, flooding logs and pressuring memory on
+# small production pods. WARNING keeps real problems visible.
+for _noisy in ("socketio.client", "engineio.client", "socketio", "engineio",
+               "httpx", "httpcore", "websockets"):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Crypto Signal Terminal")

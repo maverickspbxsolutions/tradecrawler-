@@ -353,3 +353,9 @@ Root cause: get_live did TWO sequential MetaApi RPCs (live_price 10s + candles 1
 - market_data.py get_candles -> SWR: always returns warm cache (memory, else DB) instantly and refreshes in background (_trigger_candle_refresh/_refresh_candles + _candles_refreshing guard). Blocking fetch only on true cold start (no memory+no DB).
 - PriceChart.jsx live poll 3000ms -> 2000ms (backend now non-blocking so cheap).
 - VERIFIED via curl: cold start live ~3.6s once; every warm poll ~0.1s (live) / ~0.09s (candles); Volatility100 price advanced 612.165->612.065->612.445 across polls (background refresh live). No more multi-second stalls.
+
+## Deployed site white-screen — investigating (2026-06)
+User: live/deployed site shows a blank white screen right after the latest deploy (preview is fine).
+- Ruled out code side: `yarn build` compiles clean (main ~345kB gz); served build index.html=200, main.js=200; App.js is a standard BrowserRouter SPA; preview dev build renders with no console errors.
+- Applied mitigation: throttled chatty MetaApi socket.io/engineio/httpx loggers to WARNING in server.py (they logged a line PER price tick -> backend.err.log grew ~13MB in minutes; on a small prod pod this pressures memory and could crash-loop -> blank page). Verified logs now sparse after restart.
+- Routed to deployment diagnostics (emergent__send_to_deployer, intent=debug) to check: deploy success / stale-build serving / index.html fallback, live backend pod health (520/OOM/restarts), baked REACT_APP_BACKEND_URL, and the known MetaApi demo-account contention (shared preview/prod token). RCA pending (async).
