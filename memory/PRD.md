@@ -383,3 +383,12 @@ CRITICAL: demo account balance read = ~$92 (equity $86), but goal start_balance 
 - New proposals sized by balance-% -> 0.08-0.25 lots on the $92 demo (was fixed ~6.0). Confirms goal-aware sizing active.
 - Recent win_probs 0.47-0.62 (< 0.80) -> emailed for approval, none auto-placed. Tiny-balance guard (bal < 25% of goal start) auto-pauses auto-placing on the near-empty account; resumes when balance reset. Goal left anchored at ~$9961 (correct once user resets Deriv demo to ~$10k).
 - MetaApi TooManyRequests / KeyError('type') still appear intermittently (SDK-internal, shared preview/prod demo account) — operational, non-fatal; scan still functions.
+
+### Balance reset handled + goal re-anchor (2026-06)
+- User reset Deriv demo -> balance now $10,000 (is_demo true, trade_allowed true). Tiny-balance auto-pause guard clears automatically -> hybrid auto-placing active again.
+- Re-anchored preview goal to $10k -> target $20k (db.bot_meta growth.start_balance=10000).
+- NEW admin action: POST /api/trades/goal/reanchor (require_admin) -> trade_engine.reanchor_goal() sets start_balance=current balance, target=2x. Verified returns start 10000/target 20000.
+- Frontend: admin-only "Reset goal to current balance" button in TradePanel growth-goal card (data-testid reanchor-goal-btn). Verified rendered for admin xambiep90.
+- Wording fixed for hybrid mode: DisclaimerBanner, Dashboard footer, TradePanel header now say "high-conviction trades auto-placed, rest need approval" (was "every trade needs approval").
+- Real email recipients are configured in PRODUCTION settings (live site), not preview (preview shows delivered@resend.dev test addr) — separate DBs, expected.
+- IMPORTANT: all engine fixes are in PREVIEW. Live site (tradecrawler.live) needs a REDEPLOY to get them; prod goal has its own anchor -> user clicks "Reset goal to current balance" on live after deploy.

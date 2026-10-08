@@ -89,7 +89,7 @@ export default function Dashboard() {
         </div>
 
         <footer className="mt-6 py-4 border-t border-border/40 text-[10px] font-mono text-muted-foreground text-center uppercase tracking-[0.15em]">
-          TradeCrawler · demo trading on virtual funds · every trade needs your approval · not financial advice
+          TradeCrawler · demo trading on virtual funds · high-conviction trades auto-placed, rest need approval · not financial advice
         </footer>
       </main>
 

@@ -946,6 +946,26 @@ async def _growth_target(current_equity) -> dict:
             "goal_reached": cur >= target and target > 0}
 
 
+async def reanchor_goal() -> dict:
+    """Re-baseline the growth goal to the current balance (2x it). Used after the
+    user resets the Deriv demo so progress tracks from the fresh balance."""
+    try:
+        info = await mt5_trader.account_info(force=True)
+    except Exception:  # noqa
+        info = mt5_trader.last_account()
+    if not info:
+        return {"ok": False, "error": "Couldn't read the account balance right now — try again in a moment."}
+    cur = float(info.get("balance") or info.get("equity") or 0)
+    if cur <= 0:
+        return {"ok": False, "error": "Balance reads as zero — nothing to anchor to."}
+    await db.bot_meta.update_one(
+        {"_id": "growth"},
+        {"$set": {"start_balance": round(cur, 2), "re_anchored_at": _now().isoformat()}},
+        upsert=True)
+    return {"ok": True, "start_balance": round(cur, 2), "target_balance": round(cur * 2, 2),
+            "growth_pct": 0.0, "goal_reached": False}
+
+
 async def account_summary() -> dict:
     stale = False
     try:

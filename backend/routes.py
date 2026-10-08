@@ -10,7 +10,7 @@ from typing import Optional
 
 from db import db
 from auth import get_current_user
-from licensing import platform_guard, require_advanced
+from licensing import platform_guard, require_advanced, require_admin
 import market_data as md
 from strategy_engine import Strategy, StrategyCreate, StrategyUpdate
 from backtester import run_backtest
@@ -40,6 +40,13 @@ class ProposeInput(BaseModel):
 @api.get("/trades/account")
 async def trades_account():
     return await trade_engine.account_summary()
+
+
+@api.post("/trades/goal/reanchor")
+async def trades_goal_reanchor(user: dict = Depends(require_admin)):
+    """Admin: re-baseline the 2x goal to the CURRENT balance (use after resetting
+    the Deriv demo). Target becomes 2x the fresh balance; progress resets to 0."""
+    return await trade_engine.reanchor_goal()
 
 
 @api.get("/trades/active-symbols")

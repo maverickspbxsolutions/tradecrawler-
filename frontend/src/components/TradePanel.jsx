@@ -6,6 +6,7 @@ import {
   Loader2, Gauge, ScrollText, CircleDollarSign, Target, Brain,
 } from "lucide-react";
 import { api, fmtUsd, fmtNum, pnlColor, fmtTime, formatApiErrorDetail } from "@/lib/api";
+import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
@@ -22,7 +23,22 @@ function Stat({ label, value, cls }) {
 
 export function TradePanel() {
   const qc = useQueryClient();
+  const { user } = useAuth();
+  const isAdmin = !!user?.license?.is_admin;
   const [busy, setBusy] = useState(null);
+
+  const reanchorGoal = async () => {
+    setBusy("reanchor");
+    try {
+      await api.post("/trades/goal/reanchor");
+      await qc.invalidateQueries({ queryKey: ["trade-account"] });
+      toast.success("Goal re-anchored to your current balance.");
+    } catch (e) {
+      toast.error(formatApiErrorDetail(e) || "Couldn't re-anchor the goal.");
+    } finally {
+      setBusy(null);
+    }
+  };
 
   const { data: account } = useQuery({
     queryKey: ["trade-account"],
@@ -124,7 +140,7 @@ export function TradePanel() {
     <div className="border border-border/40 bg-card rounded-sm" data-testid="trade-panel">
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-border/40">
         <div className="text-xs font-mono uppercase tracking-[0.15em] text-muted-foreground flex items-center gap-2">
-          <CircleDollarSign className="h-3.5 w-3.5" /> Demo auto-trading · approve each trade
+          <CircleDollarSign className="h-3.5 w-3.5" /> Demo auto-trading · hybrid approval
         </div>
         <div className="flex items-center gap-2">
           {account?.is_demo ? (
@@ -165,6 +181,19 @@ export function TradePanel() {
                 ? "🎯 2× goal reached — the bot keeps compounding from here."
                 : `${account.growth.growth_pct}% of the way from ${fmtUsd(account.growth.start_balance)} to the ${fmtUsd(account.growth.target_balance)} goal. SL/TP are set from each trade's prediction to grow the balance (no guarantees).`}
             </div>
+            {isAdmin && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy === "reanchor"}
+                onClick={reanchorGoal}
+                data-testid="reanchor-goal-btn"
+                className="mt-2 h-7 text-[10px] font-mono uppercase tracking-[0.08em] border-primary/40"
+              >
+                {busy === "reanchor" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Target className="h-3 w-3" />}
+                Reset goal to current balance
+              </Button>
+            )}
           </div>
         )}
 
