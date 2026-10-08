@@ -392,3 +392,10 @@ CRITICAL: demo account balance read = ~$92 (equity $86), but goal start_balance 
 - Wording fixed for hybrid mode: DisclaimerBanner, Dashboard footer, TradePanel header now say "high-conviction trades auto-placed, rest need approval" (was "every trade needs approval").
 - Real email recipients are configured in PRODUCTION settings (live site), not preview (preview shows delivered@resend.dev test addr) — separate DBs, expected.
 - IMPORTANT: all engine fixes are in PREVIEW. Live site (tradecrawler.live) needs a REDEPLOY to get them; prod goal has its own anchor -> user clicks "Reset goal to current balance" on live after deploy.
+
+### EMAIL SENDING — real root cause found & fixed in preview (2026-06)
+- Sending CODE was fine, but Resend was in TEST mode: sender was onboarding@resend.dev (shared), which Resend only lets deliver to the account owner (larsenmarlene660@gmail.com); ALL other recipients -> 403 validation_error. This (plus the silent bot) is why no alerts arrived. Proven via live Resend calls.
+- User verified domain tradecrawler.live in Resend. Confirmed via live test: sending FROM alerts@tradecrawler.live to BOTH delivered@resend.dev AND an arbitrary gmail succeeded (ids returned) => domain active, can email anyone.
+- FIX (preview): backend/.env RESEND_FROM_EMAIL changed onboarding@resend.dev -> alerts@tradecrawler.live; restarted. App pipeline /api/alerts/test -> sent:true to larsenmarlene660@gmail.com. Preview email fully working.
+- PROD TODO: production uses its own deployment secrets. Must add RESEND_FROM_EMAIL=alerts@tradecrawler.live to production secrets + redeploy, else live falls back to onboarding@resend.dev and fails. Queried deployer (read-only) for current prod secret status — pending.
+- Preview recipient reverted to delivered@resend.dev after test (live recipients are set in prod settings by user).
