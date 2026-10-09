@@ -411,3 +411,9 @@ Code-side optimizations (preview, ship next deploy):
 - Also: /api/alerts/test now returns 200 {sent:false,error} instead of raising 502 (CDN was masking the real error).
 Routed to deployer (intent=debug) for pod OOM/restart/memory-limit status and whether prod has a dedicated MetaApi account (vs shared preview). PENDING.
 EMAIL status: preview email works from alerts@tradecrawler.live; proven the production API key re_... + domain send to any recipient; live still failing because prod RESEND_FROM_EMAIL secret != alerts@tradecrawler.live (user must fix secret + Save & Re-publish). API key was shared in chat -> advise rotation.
+
+### VERIFIED on LIVE (2026-06) — after user updated secret + deploy
+- EMAIL FIXED: POST https://tradecrawler.live/api/alerts/test -> 200 {sent:true, email_id, recipients:[larsenmarlene660,likeroyalty03,topman102311]}. All 3 real recipients accepted => prod RESEND_FROM_EMAIL now = alerts@tradecrawler.live (verified domain). 
+- SITE STABLE: 8/8 hits to / and /api = 200 (no 520 in window). Browser load: /login 200 not blank; dashboard BODY_LEN 11052 renders fully, no pageerrors. ErrorBoundary + scheduler/warm optimizations live.
+- Live goal anchored $9867.41 -> $19734.82 (user can tap "Reset goal to current balance" to re-anchor exactly). Learning panel: last 43 trades 49% won.
+- OUTSTANDING: deployer RCA on prod pod OOM/restarts + shared MetaApi account still pending (preventative). Advise user rotate Resend API key (shared in chat).
