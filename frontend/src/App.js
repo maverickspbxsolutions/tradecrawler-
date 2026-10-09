@@ -5,6 +5,7 @@ import { ThemeProvider, useTheme } from "next-themes";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import Login from "@/pages/Login";
 import Dashboard from "@/pages/Dashboard";
 import { LicenseGate } from "@/components/LicenseGate";
@@ -35,34 +36,36 @@ function ThemedToaster() {
 function App() {
   return (
     <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false} disableTransitionOnChange>
-      <AuthProvider>
-        <TooltipProvider delayDuration={100}>
-          <BrowserRouter>
-            <Routes>
-              <Route
-                path="/login"
-                element={
-                  <PublicRoute>
-                    <Login />
-                  </PublicRoute>
-                }
-              />
-              <Route
-                path="/"
-                element={
-                  <ProtectedRoute>
-                    <LicenseGate>
-                      <Dashboard />
-                    </LicenseGate>
-                  </ProtectedRoute>
-                }
-              />
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
-          </BrowserRouter>
-          <ThemedToaster />
-        </TooltipProvider>
-      </AuthProvider>
+      <ErrorBoundary>
+        <AuthProvider>
+          <TooltipProvider delayDuration={100}>
+            <BrowserRouter>
+              <Routes>
+                <Route
+                  path="/login"
+                  element={
+                    <PublicRoute>
+                      <Login />
+                    </PublicRoute>
+                  }
+                />
+                <Route
+                  path="/"
+                  element={
+                    <ProtectedRoute>
+                      <LicenseGate>
+                        <Dashboard />
+                      </LicenseGate>
+                    </ProtectedRoute>
+                  }
+                />
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Routes>
+            </BrowserRouter>
+            <ThemedToaster />
+          </TooltipProvider>
+        </AuthProvider>
+      </ErrorBoundary>
     </ThemeProvider>
   );
 }

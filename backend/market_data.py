@@ -326,7 +326,8 @@ async def warm_candles():
         if now - info["ts"] <= _RECENT_TTL and info.get("msym"):
             targets[mkey] = (info["msym"], info["timeframe"])
     warmed = 0
-    for mkey, (msym, tf) in list(targets.items())[:12]:
+    # cap simultaneous MetaApi fetches to keep subscription load light
+    for mkey, (msym, tf) in list(targets.items())[:6]:
         try:
             rows = await _fetch_mt5(msym, tf)
             if rows:

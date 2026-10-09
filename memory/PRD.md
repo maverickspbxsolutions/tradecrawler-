@@ -399,3 +399,15 @@ CRITICAL: demo account balance read = ~$92 (equity $86), but goal start_balance 
 - FIX (preview): backend/.env RESEND_FROM_EMAIL changed onboarding@resend.dev -> alerts@tradecrawler.live; restarted. App pipeline /api/alerts/test -> sent:true to larsenmarlene660@gmail.com. Preview email fully working.
 - PROD TODO: production uses its own deployment secrets. Must add RESEND_FROM_EMAIL=alerts@tradecrawler.live to production secrets + redeploy, else live falls back to onboarding@resend.dev and fails. Queried deployer (read-only) for current prod secret status — pending.
 - Preview recipient reverted to delivered@resend.dev after test (live recipients are set in prod settings by user).
+
+### Site optimization — blank/black screen + Cloudflare 520 on live (2026-06)
+Symptom: live tradecrawler.live intermittently black/blank; Cloudflare "origin sent response it could not parse / empty / malformed" (520); earlier POST /api/alerts/test -> 502 while GET endpoints 200. Preview (same code) is stable (7.6GB free, no restarts) => production-specific origin failure.
+Likely drivers: (a) MetaApi TooManyRequestsException (shared preview+prod demo account/token, subscription churn) + SDK KeyError('type'); (b) pod resource limits vs persistent socket.io stream + background loops.
+Code-side optimizations (preview, ship next deploy):
+- scheduler: SCAN_SECONDS 90->150; CANDLE_WARM_SECONDS 15->30.
+- market_data.warm_candles: cap 12->6 simultaneous MetaApi fetches.
+- Frontend: NEW ErrorBoundary.jsx wrapping App (shows recoverable "Something hiccuped / Reload" fallback instead of blanking) — addresses "screen goes blank sometimes".
+- (earlier) server.py logging throttled to WARNING for socket.io/engineio/httpx.
+- Also: /api/alerts/test now returns 200 {sent:false,error} instead of raising 502 (CDN was masking the real error).
+Routed to deployer (intent=debug) for pod OOM/restart/memory-limit status and whether prod has a dedicated MetaApi account (vs shared preview). PENDING.
+EMAIL status: preview email works from alerts@tradecrawler.live; proven the production API key re_... + domain send to any recipient; live still failing because prod RESEND_FROM_EMAIL secret != alerts@tradecrawler.live (user must fix secret + Save & Re-publish). API key was shared in chat -> advise rotation.

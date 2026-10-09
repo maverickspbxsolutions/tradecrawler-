@@ -11,8 +11,8 @@ logger = logging.getLogger(__name__)
 
 POLL_SECONDS = 30            # fast loop so closed-candle alerts fire promptly
 EVOLVE_SECONDS = 86400       # daily background evolution
-SCAN_SECONDS = 90            # hunt active instruments for tradeable setups
-CANDLE_WARM_SECONDS = 15     # keep charts' candles warm & advancing (MT5 only)
+SCAN_SECONDS = 150           # hunt active instruments (eased to cut MetaApi load)
+CANDLE_WARM_SECONDS = 30     # keep charts' candles warm (eased to cut MetaApi load)
 _task = None
 _evolve_task = None
 _scan_task = None
