@@ -107,12 +107,23 @@ export function Candlestick({ candles, height = 240, liveLast = false }) {
 
     if (prevKey === structuralKey) {
       // only the last bar changed -> smooth live update, keeps zoom/scroll
-      series.update(data[data.length - 1]);
+      try {
+        series.update(data[data.length - 1]);
+      } catch {
+        // out-of-order/duplicate time etc. -> fall back to a safe full redraw
+        try {
+          series.setData(data);
+        } catch { /* ignore transient chart glitch */ }
+      }
     } else {
       const isFirst = prevKey === null;
-      series.setData(data);
-      lastKeyRef.current = structuralKey;
-      if (isFirst && chart) chart.timeScale().fitContent();
+      try {
+        series.setData(data);
+        lastKeyRef.current = structuralKey;
+        if (isFirst && chart) chart.timeScale().fitContent();
+      } catch {
+        lastKeyRef.current = null; // retry a clean setData on the next tick
+      }
     }
   }, [data, precision]);
 

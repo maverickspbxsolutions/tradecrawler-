@@ -103,7 +103,7 @@ export function PriceChart({ symbol, tf, onTfChange, strategies = [], selectedId
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-border/40">
         <div className="flex items-baseline gap-3 flex-wrap">
           {strategies.length > 0 && onSelectAsset ? (
-            <Select value={selectedId || undefined} onValueChange={onSelectAsset}>
+            <Select value={selectedId || ""} onValueChange={onSelectAsset}>
               <SelectTrigger
                 className="h-8 w-auto min-w-[150px] gap-2 rounded-sm border-border/50 bg-muted/30 px-2.5 text-lg font-semibold"
                 data-testid="asset-switcher"

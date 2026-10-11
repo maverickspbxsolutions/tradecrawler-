@@ -1,5 +1,14 @@
 # Crypto Signal Terminal — PRD
 
+## FIX (2026-10-11) — "temporary glitch / reload" ErrorBoundary hardening
+- User reported seeing the ErrorBoundary fallback ("app hit a temporary glitch ... reload"). Could not reproduce via normal navigation on preview; the global boundary blanks the whole app on ANY transient render throw and forced a manual reload.
+- Fixes (frontend only):
+  1. Candlestick.jsx: wrapped lightweight-charts `series.update()` and `series.setData()` in try/catch — out-of-order/duplicate time is a known throw source; now falls back to a safe redraw instead of crashing the app (the boundary comment itself blamed "a chart glitch").
+  2. ErrorBoundary.jsx: now AUTO-RECOVERS — on catch it silently retries up to 3 times (~1.2s apart, since data refetches every few seconds) showing a "Reconnecting…" spinner; only shows the manual Reload button if it keeps failing. Transient glitches self-heal with no user action.
+  3. PriceChart.jsx: asset-switcher Select was flipping uncontrolled->controlled (value={selectedId || undefined}); changed to value={selectedId || ""}. Console confirmed the warning is now GONE.
+- Verified via screenshot + console capture: no error-boundary, no pageerror, no controlled/uncontrolled warning; switching assets (Gold->BTC) updates chart+outlook smoothly. Frontend compiled. PREVIEW only -> needs next deploy for production.
+
+
 ## CHANGE (2026-10-11) — Asset switcher dropdown in chart header
 - User ask: a dropdown to switch between assets without scrolling down to the StrategyList.
 - PriceChart.jsx: replaced the static symbol title with a shadcn Select (data-testid="asset-switcher") listing all strategies (name + symbol); onValueChange -> setSelectedId. Falls back to plain symbol text if no strategies/handler.
