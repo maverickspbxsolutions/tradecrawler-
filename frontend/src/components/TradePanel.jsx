@@ -341,6 +341,11 @@ export function TradePanel() {
                       <Stat label="You aim to win" value={p.est_reward_usd != null ? fmtUsd(p.est_reward_usd) : "—"} cls="text-buy" />
                       <Stat label="Usually takes" value={p.hold_label || "—"} />
                     </div>
+                    <div className="text-[11px] font-mono text-muted-foreground border border-border/40 rounded-sm px-2 py-1.5 mb-2" data-testid={`exit-plan-${p.id}`}>
+                      <span className="uppercase tracking-[0.1em] text-[9px] text-muted-foreground/80">Exit plan</span>{" "}
+                      Take profit <span className="text-buy">{fmtNum(p.take_profit)}</span> · cut loss <span className="text-sell">{fmtNum(p.stop_loss)}</span>
+                      {p.exit_by_label ? <> · if neither hits within <span className="text-foreground">~{p.exit_by_label.replace("~", "")}</span>, close it manually</> : null}
+                    </div>
                     {p.reasons?.length > 0 && (
                       <ul className="text-[11px] text-muted-foreground font-mono space-y-0.5 mb-2 list-disc pl-4">
                         {p.reasons.slice(0, 2).map((r, i) => <li key={i}>{r}</li>)}

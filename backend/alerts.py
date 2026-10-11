@@ -285,6 +285,17 @@ def _proposal_html(prop: dict, auto_placed: bool = False) -> str:
                  f'<strong>{escape(str(hold))}</strong> (day-trade, 30min-5h).</p>') if hold else ""
     risk_line = (f'<p style="font-size:15px;margin:2px 0">Sized to risk about '
                  f'<strong>${risk:,.2f}</strong> if the stop-loss hits.</p>') if risk is not None else ""
+    exit_by = prop.get("exit_by_label") or prop.get("hold_label")
+    exit_time_line = (f'<p style="font-size:15px;margin:2px 0">&#9201; If neither price is hit within about '
+                      f'<strong>{escape(str(exit_by))}</strong>, close it manually &mdash; the setup has run '
+                      f'out of time.</p>') if exit_by else ""
+    exit_html = (
+        f'<p style="font-size:16px;margin:14px 0 4px"><strong>When to exit:</strong></p>'
+        f'<p style="font-size:15px;margin:2px 0">Take profit (close in the green) at '
+        f'<strong style="color:#00E676">{tp:,.4f}</strong>.</p>'
+        f'<p style="font-size:15px;margin:2px 0">Cut the loss (stop-loss) at '
+        f'<strong style="color:#FF3366">{sl:,.4f}</strong>.</p>'
+        f'{exit_time_line}')
 
     if auto_placed:
         cta = ('High-conviction setup &mdash; the crawler has ALREADY PLACED this demo trade for you. '
@@ -313,6 +324,7 @@ def _proposal_html(prop: dict, auto_placed: bool = False) -> str:
         f'Stop-loss: <strong style="color:#FF3366">{sl:,.4f}</strong>.</p>'
         f'<p style="font-size:15px;margin:2px 0">Confidence <strong>{conf}%</strong>.</p>'
         f'{win_line}{hold_line}{risk_line}'
+        f'{exit_html}'
         f'<div style="background:{cta_bg};color:#000;padding:12px;font-size:14px;'
         f'font-weight:bold;margin-top:16px;text-align:center;border-radius:6px">'
         f'{cta}</div>'

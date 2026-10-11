@@ -1,5 +1,17 @@
 # Crypto Signal Terminal — PRD
 
+## CHANGE (2026-10-11) — Realistic SL/TP + lot ladder + explicit exit plan
+- User ask: tell the user WHEN to exit (TP, SL, and a time-based bail-out); set REALISTIC SL/TP; size by realistic lots NOT just balance. User chose: standard lot ladder 0.10->0.50 by confidence (balance-independent); add time-based exit instruction; SL/TP felt TOO WIDE.
+- risk_config.py: added LADDER_LOT_MIN=0.10, LADDER_LOT_MAX=0.50 and ladder_lot(confidence) (0.10 at MIN_CONFIDENCE -> 0.50 at 100). (risk_pct_for/confidence_lot kept but no longer used for proposal sizing.)
+- trade_engine.propose(): now sizes with rc.ladder_lot(confidence) — NOT % of balance. Kept _cap_lot_to_risk only as a light safety ceiling (never grows lot; rarely binds at ladder lots). Adds two plain-English reason lines: "The plan..." and "When to exit: take profit at TP, cut loss at SL, if neither within ~<window> close manually."
+- trade_engine._optimize_levels(): tightened SL (atr mult 1.3->1.0, floor entry*0.0012->0.0008, swing floor 0.0008->0.0006). _RR_CANDIDATES capped to (1.0,1.25,1.5,2.0) so TPs are REACHABLE within the <=3h hold (no more far 2.5/3.0 targets that rarely fill).
+- prop now stores window_label + exit_by_label.
+- alerts._proposal_html: added a "When to exit" block (TP price, SL price, time-based "close within ~<window>" line).
+- TradePanel.jsx: added an "Exit plan" line per proposal (TP / SL / close-by time). SettingsDialog max hold already capped at 3.
+- Side effect (expected & aligned): with reachable TPs + win-floor gate, low-probability setups that previously "passed" only via a far 3:1 TP (e.g. V100 SELL ~33% win) are now correctly rejected -> fewer but more realistic/reachable setups. If user wants more frequency, loosen _RR_CANDIDATES / win_floor.
+- Verified: ladder_lot(58/75/90/100)=0.10/0.26/0.40/0.50; SL ~0.24% of price (was wider); holds ~1h15m-1h30m; email "When to exit" renders; frontend compiled. PREVIEW only — needs next deploy for production.
+
+
 ## CHANGE (2026-10-11) — Shorter holds + optimum entry (trade logic)
 - User ask: shorten typical hold (was ~3h) to buckets ~30m/1h/1h30m/2h30m, with 3h as the absolute max reserved for great trades; and sharpen entry timing ("best/optimum entry"). NOTE: no profit promises — framed as timing/efficiency only.
 - risk_config.py: SIM_HORIZON_BARS 20->12 (3h hard ceiling on 15m). Added MAX_HOLD_HOURS=3.0, SOFT_HOLD_HOURS=2.5, LONG_HOLD_MIN_SCORE=80, LONG_HOLD_MIN_EV=0.30.

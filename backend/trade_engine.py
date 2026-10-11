@@ -393,10 +393,10 @@ async def _realized_profit(position_id: str):
         return None
 
 
-# Reward:risk targets the simulation chooses between. Letting winners run (higher
-# R) is how the balance compounds toward the 2x goal — but only when the forward
-# simulation says the higher target still carries positive expected value.
-_RR_CANDIDATES = (1.0, 1.5, 2.0, 2.5, 3.0)
+# Reward:risk targets the simulation chooses between. Kept modest and REACHABLE
+# within the short (<=3h) hold — far targets rarely fill in time, so we cap the
+# range and let the per-bar efficiency picker choose the best one.
+_RR_CANDIDATES = (1.0, 1.25, 1.5, 2.0)
 
 
 def _optimize_levels(candles: list, side: str, entry: float, atr: float,
@@ -406,12 +406,12 @@ def _optimize_levels(candles: list, side: str, entry: float, atr: float,
     otherwise to volatility (ATR); the take-profit is chosen by simulating each
     reward:risk target and keeping the one with the best expected value
     (growth objective), tie-broken by win probability."""
-    atr_sl = max(1.3 * atr, entry * 0.0012)
+    atr_sl = max(1.0 * atr, entry * 0.0008)
     sl_dist = atr_sl
     if swing_dist and swing_dist > 0:
         # well-timed entry near value -> stop just beyond the swing, but keep it
         # sane: never tighter than ~0.6 ATR (noise) nor wider than the ATR stop.
-        sl_dist = min(max(swing_dist, 0.6 * atr, entry * 0.0008), atr_sl)
+        sl_dist = min(max(swing_dist, 0.6 * atr, entry * 0.0006), atr_sl)
     best = None
     for rr in _RR_CANDIDATES:
         tp_dist = rr * sl_dist
@@ -642,39 +642,35 @@ async def propose(signal_symbol: str, timeframe: str = None) -> dict:
     else:
         sl, tp = round(price + sl_dist, d), round(price - tp_dist, d)
 
-    # ---- goal-aware sizing: risk a % of the CURRENT balance, paced toward the 2x goal ----
+    # ---- realistic STANDARD LOT LADDER (balance-INDEPENDENT) so the numbers are
+    # identical whether the bot places them on demo or the user copies them live ----
     capped_note = ""
     try:
         acct = await account_summary()
-        avail = acct.get("available")
-        balance = (acct.get("balance") or acct.get("equity")) if avail else None
-        growth = acct.get("growth") or {}
+        equity = (acct.get("equity") or acct.get("balance")) if acct.get("available") else None
     except Exception:  # noqa
-        balance, growth = None, {}
-    vpu = _value_per_unit(spec)
-    if balance and vpu and sl_dist > 0:
-        risk_pct = rc.risk_pct_for(a["confidence"], growth.get("growth_pct"))
-        risk_usd = float(balance) * risk_pct
-        desired_lot = risk_usd / (sl_dist * vpu)
-    else:
-        desired_lot = rc.confidence_lot(a["confidence"])  # fallback if balance unreadable
+        acct, equity = {}, None
+    desired_lot = rc.ladder_lot(a["confidence"])     # 0.10 -> 0.50 by confidence
     lot, est_risk, vpu = _clamp_lot(spec, desired_lot, sl_dist)
-    # hard safety ceiling: never risk more than RISK_CAP_PCT of equity on one trade
-    equity = (acct.get("equity") or acct.get("balance")) if (balance is not None) else None
+    # Light safety ceiling only (never GROWS the lot): keeps a single trade from
+    # risking an absurd share of a very small account. At ladder lots it rarely binds.
     if equity:
         safe_lot = _cap_lot_to_risk(spec, lot, sl_dist, equity)
         if safe_lot < lot:
             lot, est_risk, vpu = _clamp_lot(spec, safe_lot, sl_dist)
-            capped_note = (f" Lot trimmed to {lot} so this trade risks ≤ "
-                           f"{int(rc.RISK_CAP_PCT*100)}% of your ${round(float(equity),2)} equity.")
+            capped_note = (f" Lot trimmed to {lot} to keep the risk sensible on your "
+                           f"${round(float(equity),2)} balance.")
     est_reward = round(est_risk * rr, 2) if est_risk is not None else None
+    exit_by = a.get("window_label") or a.get("hold_label")
     reasons = list(a.get("reasons", []))
     reasons.append(
         f"The plan: {'buy' if side == 'BUY' else 'sell'} {lot} lots — risking about "
         f"${est_risk if est_risk is not None else '—'} to aim for about "
         f"${est_reward if est_reward is not None else '—'} "
-        f"(roughly a {int(a['win_prob']*100)}% chance of working). Usually wraps up in "
-        f"{a['hold_label']}.{capped_note}")
+        f"(roughly a {int(a['win_prob']*100)}% chance of working).{capped_note}")
+    reasons.append(
+        f"When to exit: take profit at {tp}, or cut the loss at {sl}. If neither is hit "
+        f"within about {exit_by}, close it manually — the setup has run out of time.")
 
     prop = {
         "id": str(uuid.uuid4()),
@@ -702,6 +698,8 @@ async def propose(signal_symbol: str, timeframe: str = None) -> dict:
         "horizon_bars": a["horizon_bars"],
         "est_hold_min": a["est_hold_min"],
         "hold_label": a["hold_label"],
+        "window_label": a.get("window_label"),
+        "exit_by_label": a.get("window_label") or a["hold_label"],
         "est_risk_usd": est_risk,
         "est_reward_usd": est_reward,
         "reasons": reasons,

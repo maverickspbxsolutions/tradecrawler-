@@ -21,10 +21,16 @@ MAX_LOT = 10.0
 # Floor so dynamic sizing never rounds to zero.
 MIN_LOT = 0.01
 
-# Realistic sizing: start at BASE_LOT at the minimum tradeable confidence and
-# scale LINEARLY up to MAX_LOT at ~100% confidence (then clamped to each
-# symbol's own volume rules). The more conviction, the bigger the position.
+# Realistic, repeatable position sizes the user can copy on ANY account — sized by
+# confidence, NOT by account balance. The caller clamps to the symbol's own volume
+# rules and the hard MAX_LOT ceiling.
 BASE_LOT = 2.0
+
+# Standard lot ladder (balance-INDEPENDENT): 0.10 lots at the minimum tradeable
+# confidence, scaling linearly up to 0.50 lots at full confidence. Same numbers
+# whether the bot places the trade on demo or the user copies it on their own account.
+LADDER_LOT_MIN = 0.10
+LADDER_LOT_MAX = 0.50
 
 # Max number of the bot's own trades open at the same time (across any symbols).
 MAX_OPEN_POSITIONS = 3
@@ -110,6 +116,21 @@ def confidence_lot(confidence) -> float:
     frac = max(0.0, min(1.0, frac))
     lot = BASE_LOT + frac * (MAX_LOT - BASE_LOT)
     return round(max(BASE_LOT, min(MAX_LOT, lot)), 2)
+
+
+def ladder_lot(confidence) -> float:
+    """Standard, balance-INDEPENDENT lot ladder: LADDER_LOT_MIN (0.10) at the
+    minimum tradeable confidence, scaling linearly to LADDER_LOT_MAX (0.50) at
+    full confidence. Realistic sizes the user can copy on any account; the caller
+    clamps to the symbol's volume step/min/max."""
+    try:
+        conf = float(confidence)
+    except (TypeError, ValueError):
+        conf = MIN_CONFIDENCE
+    span = max(1.0, 100.0 - MIN_CONFIDENCE)
+    frac = max(0.0, min(1.0, (conf - MIN_CONFIDENCE) / span))
+    lot = LADDER_LOT_MIN + frac * (LADDER_LOT_MAX - LADDER_LOT_MIN)
+    return round(max(LADDER_LOT_MIN, min(lot, LADDER_LOT_MAX)), 2)
 
 
 def as_dict() -> dict:
