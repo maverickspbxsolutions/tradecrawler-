@@ -1,5 +1,14 @@
 # Crypto Signal Terminal — PRD
 
+## INCIDENT (2026-10-11) — "no emails in a while" ROOT CAUSE + FIX
+- Symptom: user stopped receiving ALL emails (trade proposals, signal alerts, basic-tier) on the live site.
+- Root cause: the MetaApi account (TradeCrawler-MT5-Demo, login 32430043, Deriv-Demo, region london) was in state **UNDEPLOYED / DISCONNECTED**. Undeployed = MetaApi does not run or connect to the broker -> `account.wait_connected()` times out -> 0 market symbols -> auto_scan returns "account unreachable" -> no setups -> no proposal/signal emails. Resend/email delivery was never the problem.
+- Diagnose quickly via MetaApi provisioning REST: GET https://mt-provisioning-api-v1.agiliumtrade.agiliumtrade.ai/users/current/accounts/{MT5_ACCOUNT_ID} with header auth-token=METAAPI_TOKEN -> check "state" and "connectionStatus".
+- Fix: user redeployed the account (state DEPLOYED + CONNECTED). After backend restart: 727 symbols, scan found tradeable setups (V100 SELL, V25 BUY), /api/alerts/test returned sent=True.
+- Code safeguard added in mt5_trader.py `_connect()`: if account.state == "UNDEPLOYED", call `await account.deploy()` before `wait_connected()` so this self-heals. (Goes to production on next deploy.)
+- NOTE: preview alert_emails only contains `delivered@resend.dev` (Resend test sink, never reaches a real inbox). Confirm the user's REAL email is in the live recipients list.
+
+
 ## Original Problem Statement
 Web-based crypto signaling bot (alerts-only, no order execution). Rule-based signal engine
 (RSI, MA crossover, MACD, volume), backtesting with fees+slippage vs buy-and-hold, live

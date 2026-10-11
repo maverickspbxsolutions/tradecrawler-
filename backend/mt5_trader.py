@@ -88,6 +88,16 @@ async def _connect():
             if _api is None:
                 _api = MetaApi(os.environ["METAAPI_TOKEN"])
             account = await _api.metatrader_account_api.get_account(os.environ["MT5_ACCOUNT_ID"])
+            # Self-heal: a billing/quota lapse (or a manual change) can leave the
+            # account UNDEPLOYED, which silently kills all market data and alerts.
+            # Redeploy it before waiting for the broker so the outage self-recovers.
+            try:
+                state = getattr(account, "state", None)
+                if state == "UNDEPLOYED":
+                    logger.warning("MT5 account is UNDEPLOYED — redeploying it")
+                    await account.deploy()
+            except Exception as de:  # noqa
+                logger.warning(f"MT5 auto-deploy failed: {de}")
             await account.wait_connected()
             conn = account.get_rpc_connection()
             await conn.connect()
