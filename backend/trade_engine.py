@@ -14,6 +14,7 @@ Hard safety rails (see risk_config.py):
 import uuid
 import asyncio
 import logging
+import time
 from datetime import datetime, timezone, timedelta
 
 import pandas as pd
@@ -34,6 +35,20 @@ from alerts import get_settings
 logger = logging.getLogger("trade_engine")
 
 PROPOSAL_TTL_MIN = 15  # a proposal's reference price goes stale after this
+
+_pe_cache = {"ts": 0.0, "data": None}
+
+
+async def _platform_edge_cached():
+    """Cached (~5 min) read of the community platform-edge doc."""
+    now = time.time()
+    if _pe_cache["data"] is not None and now - _pe_cache["ts"] < 300:
+        return _pe_cache["data"]
+    import strategy_lab
+    data = await strategy_lab.get_platform_edge()
+    _pe_cache.update({"ts": now, "data": data})
+    return data
+
 
 # Regime / confluence filters (research-grounded edge: trade trends, skip chop)
 ADX_MIN = 20.0          # ADX below this = weak/choppy trend -> skip
@@ -450,6 +465,29 @@ async def _analyze(signal_symbol: str, timeframe: str, horizon: int) -> dict:
     direction = ev["direction"]
     side = ev["side"]
     conf = float(ev["confidence"])
+    # Shared "platform edge": nudge confidence a touch when this setup aligns with
+    # what the community's uploaded strategies collectively favour. Safe + capped;
+    # benefits every user, including those who never uploaded anything.
+    try:
+        pe = await _platform_edge_cached()
+        if pe and pe.get("contributed_strategies"):
+            bump, why = 0, []
+            want_dir = "long" if side == "BUY" else "short"
+            if pe.get("preferred_direction") == want_dir:
+                bump += 2; why.append("direction")
+            reg = "trend" if ev["regime"] == "momentum" else ("range" if ev["regime"] == "reversion" else "any")
+            if pe.get("preferred_regime") == reg and reg != "any":
+                bump += 2; why.append("market type")
+            trig = (ev.get("trigger") or "").lower()
+            es = pe.get("preferred_entry_style") or ""
+            if es and (es in trig or (es == "pullback" and "pull" in trig) or (es == "breakout" and "break" in trig)):
+                bump += 2; why.append("entry style")
+            if bump:
+                conf = min(100.0, conf + bump)
+                ev.setdefault("reasons", []).append(
+                    "This lines up with what the platform's strategies favour (" + ", ".join(why) + ").")
+    except Exception:  # noqa — bias must never break scanning
+        pass
     score = ev["score"] if direction == "Up" else -ev["score"]  # signed for sim drift lean
     adx_v = ev["adx"]
     regime = {"trend": ev["regime"]}

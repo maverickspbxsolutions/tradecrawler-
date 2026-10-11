@@ -417,3 +417,13 @@ EMAIL status: preview email works from alerts@tradecrawler.live; proven the prod
 - SITE STABLE: 8/8 hits to / and /api = 200 (no 520 in window). Browser load: /login 200 not blank; dashboard BODY_LEN 11052 renders fully, no pageerrors. ErrorBoundary + scheduler/warm optimizations live.
 - Live goal anchored $9867.41 -> $19734.82 (user can tap "Reset goal to current balance" to re-anchor exactly). Learning panel: last 43 trades 49% won.
 - OUTSTANDING: deployer RCA on prod pod OOM/restarts + shared MetaApi account still pending (preventative). Advise user rotate Resend API key (shared in chat).
+
+## Strategy Lab — users teach the bot (2026-06)
+Admin + advanced users upload trade logic; bot learns their style AND builds a shared global edge. NO code execution (structured rules/priors only). Claude (claude-sonnet-5-5) via EMERGENT_LLM_KEY.
+Backend:
+- strategy_lab.py: parse_strategy(text)->Claude->strict JSON mapped to engine Rule schema {rsi,ma_cross,macd,volume} + style_notes + bias{direction,regime,entry_style,risk_appetite} + confidence (_coerce validates). extract_text(pdf via pypdf / csv via pandas summary / txt). recompute_platform_edge()/get_platform_edge() aggregate all contributed strategies' biases into db.bot_meta "platform_edge".
+- routes.py (gated: Depends(platform_guard)+require_advanced(user)): POST /strategies/ai-parse, POST /strategies/ai-upload (multipart, 5MB cap), POST /strategies/ai-save (saves Strategy w/ owner_id/owner_name/source/ai_style_notes/ai_bias/ai_confidence + recomputes edge), GET /strategies/platform-edge. Defined before /strategies/{sid} to avoid route clash.
+- trade_engine: _platform_edge_cached() (5min); in _analyze, small capped confidence nudge (+2 each, dir/regime/entry-style alignment) when setup matches platform lean — wrapped in try/except, never breaks scanning. Benefits all users incl. non-uploaders.
+- added pypdf to requirements; EMERGENT_LLM_KEY added to backend/.env.
+Frontend: StrategyLab.jsx (advanced-gated via license.tier_rank>=3||is_admin) added to Dashboard — "What the bot learned from everyone" edge banner + Describe/Upload tabs -> AI preview (rules+bias+match%) -> Save & teach. Guided builder already existed (StrategyList/StrategyFormDialog).
+VERIFIED: ai-parse (gold pullback), ai-save+platform-edge (curl), ai-upload CSV + TXT (curl), full browser flow (describe->interpret->preview V75 fade with bias badges->save button). All gated to admin/advanced. Uses universal key (costs credits).

@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timezone, timedelta
 import numpy as np
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 from typing import Optional
 
@@ -18,6 +18,7 @@ from paper_engine import run_strategy_step, backfill_signals, PAPER_CAPITAL, _hu
 from alerts import get_settings, send_email, EMAIL_FROM_NAME
 from scheduler import POLL_SECONDS, EVOLVE_SECONDS
 from evolution import evolve_strategy, detect_regime
+import strategy_lab
 from outlook import compute_outlook
 import risk_config
 import trade_engine
@@ -256,6 +257,74 @@ async def create_strategy(body: StrategyCreate):
     asyncio.create_task(backfill_signals(strat.model_dump()))
     asyncio.create_task(_auto_evaluate(strat.id))
     return strat.model_dump()
+
+
+# ---- Strategy Lab: AI-assisted upload (admin + advanced only) ----
+class AiParseInput(BaseModel):
+    text: str
+
+
+class AiSaveInput(BaseModel):
+    parsed: dict
+    source: str = "text"
+
+
+@api.post("/strategies/ai-parse")
+async def strategies_ai_parse(body: AiParseInput, user: dict = Depends(platform_guard)):
+    """Interpret a plain-English strategy into engine rules (preview, not saved)."""
+    require_advanced(user)
+    try:
+        return {"parsed": await strategy_lab.parse_strategy(body.text)}
+    except Exception as e:  # noqa
+        raise HTTPException(400, f"Couldn't interpret that: {e}")
+
+
+@api.post("/strategies/ai-upload")
+async def strategies_ai_upload(file: UploadFile = File(...), user: dict = Depends(platform_guard)):
+    """Read an uploaded PDF/CSV/TXT, interpret it into engine rules (preview)."""
+    require_advanced(user)
+    content = await file.read()
+    if len(content) > 5 * 1024 * 1024:
+        raise HTTPException(413, "File too large (max 5MB).")
+    try:
+        text = strategy_lab.extract_text(file.filename, content)
+        parsed = await strategy_lab.parse_strategy(text)
+        return {"parsed": parsed, "chars": len(text)}
+    except Exception as e:  # noqa
+        raise HTTPException(400, f"Couldn't read/interpret that file: {e}")
+
+
+@api.post("/strategies/ai-save")
+async def strategies_ai_save(body: AiSaveInput, user: dict = Depends(platform_guard)):
+    """Save an AI-parsed strategy as a runnable Strategy owned by this user, and
+    fold its style into the global platform edge."""
+    require_advanced(user)
+    p = strategy_lab._coerce(body.parsed or {})
+    strat = Strategy(**{
+        "name": p["name"], "symbol": p["symbol"], "timeframe": p["timeframe"],
+        "entry_rules": p["entry_rules"], "exit_rules": p["exit_rules"], "logic": p["logic"],
+    })
+    doc = strat.model_dump()
+    doc.update({
+        "owner_id": user.get("id") or user.get("username"),
+        "owner_name": user.get("username"),
+        "source": body.source,
+        "ai_style_notes": p["style_notes"],
+        "ai_bias": p["bias"],
+        "ai_confidence": p["confidence"],
+    })
+    await db.strategies.insert_one(doc)
+    asyncio.create_task(backfill_signals(doc))
+    asyncio.create_task(_auto_evaluate(strat.id))
+    edge = await strategy_lab.recompute_platform_edge()
+    doc.pop("_id", None)
+    return {"strategy": doc, "platform_edge": edge}
+
+
+@api.get("/strategies/platform-edge")
+async def strategies_platform_edge():
+    """What the bot has learned across everyone's contributed strategies."""
+    return await strategy_lab.get_platform_edge()
 
 
 @api.get("/strategies/{sid}")

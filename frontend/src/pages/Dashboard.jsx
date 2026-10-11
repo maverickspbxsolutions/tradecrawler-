@@ -16,6 +16,7 @@ import { StrategyFormDialog } from "@/components/StrategyFormDialog";
 import { SettingsDialog } from "@/components/SettingsDialog";
 import { EvolutionPanel } from "@/components/EvolutionPanel";
 import { TradePanel } from "@/components/TradePanel";
+import { StrategyLab } from "@/components/StrategyLab";
 
 export default function Dashboard() {
   const [selectedId, setSelectedId] = useState(null);
@@ -82,6 +83,10 @@ export default function Dashboard() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mt-3">
           <BacktestPanel strategy={selected} />
           <PaperPanel strategy={selected} />
+        </div>
+
+        <div className="mt-3">
+          <StrategyLab />
         </div>
 
         <div className="mt-3">
