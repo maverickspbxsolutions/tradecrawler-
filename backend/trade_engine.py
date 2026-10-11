@@ -194,7 +194,7 @@ async def _risk_gate(symbol: str, lot: float) -> str | None:
 async def _scan_targets() -> list:
     """Every instrument the bot should hunt for setups on: the Gold/BTC defaults
     plus the symbol of every strategy the user has turned on (enabled). All scanned
-    on the intraday day-trading timeframe (30min-5h holds)."""
+    on the intraday day-trading timeframe (short ~30min-3h holds)."""
     tf = rc.TRADE_TIMEFRAME
     # 24/7 synthetic indices trend strongly and never close, so the bot always has
     # something to hunt even when Gold/BTC are choppy or the FX session is quiet.
@@ -420,7 +420,11 @@ def _optimize_levels(candles: list, side: str, entry: float, atr: float,
         else:
             sl, tp = entry + sl_dist, entry - tp_dist
         pred = _predict(candles, side, entry, sl, tp, score, horizon)
-        key = (pred["expected_r"], pred["win_prob"])
+        # Prefer the target that pays off EFFICIENTLY (expected value PER BAR held),
+        # not just the highest raw EV — this keeps holds short and favours getting
+        # in and out of the move quickly rather than letting it drag for hours.
+        eff = pred["expected_r"] / max(1.0, pred["est_hold_bars"])
+        key = (round(eff, 5), pred["expected_r"], pred["win_prob"])
         if best is None or key > best["key"]:
             best = {"rr": rr, "sl_dist": sl_dist, "tp_dist": tp_dist, "pred": pred, "key": key}
     return best
@@ -434,6 +438,7 @@ async def _trade_settings() -> dict:
     if tf not in _TF_MIN:
         tf = rc.TRADE_TIMEFRAME
     max_hold_h = float(s.get("max_hold_hours") or (rc.SIM_HORIZON_BARS * _tf_minutes(rc.TRADE_TIMEFRAME) / 60))
+    max_hold_h = min(max_hold_h, rc.MAX_HOLD_HOURS)   # hard 3h ceiling (keep trades short)
     horizon = max(2, int(round(max_hold_h * 60 / _tf_minutes(tf))))
     return {
         "timeframe": tf,
@@ -540,6 +545,16 @@ async def _analyze(signal_symbol: str, timeframe: str, horizon: int) -> dict:
     tf_min = _tf_minutes(timeframe)
     hold_min = pred["est_hold_bars"] * tf_min
     hold_label = _humanize_mins(hold_min)
+    # Hold-time preference: keep trades SHORT. If the sim says this would take
+    # longer than the soft target (~2h30m) to pay off, skip it for a quicker setup
+    # UNLESS it's an exceptional trade — only a great setup earns the full 3h.
+    soft_bars = rc.SOFT_HOLD_HOURS * 60 / tf_min
+    if pred["est_hold_bars"] > soft_bars and not (
+            ev["score"] >= rc.LONG_HOLD_MIN_SCORE and cal_ev >= rc.LONG_HOLD_MIN_EV):
+        return {"ok": False, "mt5_symbol": mt5_sym, "direction": direction, "side": side,
+                "confidence": int(conf), "regime": ev.get("regime"), "score": ev.get("score"),
+                "reason": (f"{'Buy' if side == 'BUY' else 'Sell'} setup would take longer than ~2h 30m "
+                           f"to pay off and isn't strong enough for a long hold — waiting for a quicker one.")}
     window_label = _humanize_mins(pred["horizon_bars"] * tf_min)
     base = {"mt5_symbol": mt5_sym, "signal_symbol": signal_symbol, "timeframe": timeframe,
             "direction": direction, "side": side, "confidence": int(conf),

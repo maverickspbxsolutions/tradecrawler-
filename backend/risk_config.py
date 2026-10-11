@@ -73,12 +73,18 @@ def risk_pct_for(confidence, growth_pct=None) -> float:
         pct *= 0.8
     return round(max(RISK_PCT_MIN * 0.3, min(pct, RISK_CAP_PCT)), 4)
 
-# Forward Monte-Carlo prediction settings. Tuned for intraday day-trading:
-# 15-minute bars with a 20-bar (~5 hour) max horizon. Profit/odds are measured
-# over a 30-minute to 5-hour window, matching the user's typical hold time.
+# Forward Monte-Carlo prediction settings. Tuned for SHORT intraday day-trading:
+# 15-minute bars with a 12-bar (3 hour) HARD max horizon. Typical holds target
+# ~30min-2h30m; a trade only earns the full 3h when it's an exceptional setup.
 TRADE_TIMEFRAME = "15m"
 SIM_PATHS = 600
-SIM_HORIZON_BARS = 20
+SIM_HORIZON_BARS = 12            # 12 x 15m = 3h hard ceiling
+
+# ---- hold-time shaping (keep trades short) ----
+MAX_HOLD_HOURS = 3.0             # absolute longest hold the bot will ever target
+SOFT_HOLD_HOURS = 2.5            # beyond this, only EXCEPTIONAL setups are allowed
+LONG_HOLD_MIN_SCORE = 80         # a 2h30m-3h trade must be this strong (0-100)
+LONG_HOLD_MIN_EV = 0.30          # ...and carry at least this expectancy (in R)
 
 
 def suggest_lot(signal_confidence=None, volatility_pct=None) -> float:

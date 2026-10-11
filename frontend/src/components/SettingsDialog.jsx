@@ -182,8 +182,8 @@ export function SettingsDialog({ open, onOpenChange }) {
                 </select>
               </div>
               <div>
-                <span className="text-[9px] font-mono uppercase text-muted-foreground">Max hold (hours)</span>
-                <Input type="number" step="0.5" min="0.5" max="12" value={form.max_hold_hours ?? 5}
+                <span className="text-[9px] font-mono uppercase text-muted-foreground">Max hold (hours, ≤3)</span>
+                <Input type="number" step="0.5" min="0.5" max="3" value={form.max_hold_hours ?? 3}
                   onChange={(e) => set("max_hold_hours", parseFloat(e.target.value))}
                   onBlur={() => save.mutate({ max_hold_hours: form.max_hold_hours })}
                   className="h-8 rounded-sm num text-xs mt-0.5" data-testid="max-hold-input" />

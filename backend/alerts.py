@@ -234,7 +234,7 @@ async def get_settings() -> dict:
             "max_emails_per_day": 50,
             "min_minutes_between_same_strategy": 15,
             "trade_timeframe": "15m",
-            "max_hold_hours": 5,
+            "max_hold_hours": 3,
             "auto_approve": True,
             "auto_approve_min_winprob": 0.80,
             "trailing_enabled": True,

@@ -1,5 +1,17 @@
 # Crypto Signal Terminal — PRD
 
+## CHANGE (2026-10-11) — Shorter holds + optimum entry (trade logic)
+- User ask: shorten typical hold (was ~3h) to buckets ~30m/1h/1h30m/2h30m, with 3h as the absolute max reserved for great trades; and sharpen entry timing ("best/optimum entry"). NOTE: no profit promises — framed as timing/efficiency only.
+- risk_config.py: SIM_HORIZON_BARS 20->12 (3h hard ceiling on 15m). Added MAX_HOLD_HOURS=3.0, SOFT_HOLD_HOURS=2.5, LONG_HOLD_MIN_SCORE=80, LONG_HOLD_MIN_EV=0.30.
+- trade_engine._trade_settings: hard-caps effective max_hold_h at rc.MAX_HOLD_HOURS (3h) regardless of stored/legacy value.
+- trade_engine._optimize_levels: target selection now maximizes EV-PER-BAR (efficiency) not raw EV -> favours setups that resolve fast = shorter holds.
+- trade_engine._analyze: added soft hold gate — if sim est_hold > 2h30m, skip UNLESS score>=80 AND cal_ev>=0.30 (only exceptional trades earn the 3h hold). Hard reject already applies at >=12 bars.
+- edge.py: tightened entry (EXT_MAX_ATR 2.2->2.0, VALUE_ZONE_ATR 1.4->1.2) so it enters closer to value / chases less.
+- alerts.get_settings default max_hold_hours 5->3; existing settings doc migrated to 3; SettingsDialog UI max 12->3, default 3.
+- Verified: deterministic test shows holds within 3h and efficiency pick resolves faster w/ >= EV; live scan shows tighter entry (V100 held back for a pullback instead of chasing). Backend clean, no errors.
+- Deploy note: these trade-logic changes are in PREVIEW only; they reach production on the NEXT deploy.
+
+
 ## INCIDENT (2026-10-11) — "no emails in a while" ROOT CAUSE + FIX
 - Symptom: user stopped receiving ALL emails (trade proposals, signal alerts, basic-tier) on the live site.
 - Root cause: the MetaApi account (TradeCrawler-MT5-Demo, login 32430043, Deriv-Demo, region london) was in state **UNDEPLOYED / DISCONNECTED**. Undeployed = MetaApi does not run or connect to the broker -> `account.wait_connected()` times out -> 0 market symbols -> auto_scan returns "account unreachable" -> no setups -> no proposal/signal emails. Resend/email delivery was never the problem.

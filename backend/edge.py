@@ -18,8 +18,8 @@ RSI_FADE_LO = 33.0      # fade long when RSI <= this in a reversion regime
 RSI_FADE_HI = 67.0      # fade short when RSI >= this in a reversion regime
 
 # ---- entry timing (don't chase; get in near value) ----
-EXT_MAX_ATR = 2.2       # price this many ATRs past the average = overextended -> wait
-VALUE_ZONE_ATR = 1.4    # within this many ATRs of the average = fine to trade with the trend
+EXT_MAX_ATR = 2.0       # price this many ATRs past the average = overextended -> wait
+VALUE_ZONE_ATR = 1.2    # within this many ATRs of the average = fine to trade with the trend
 PULLBACK_ZONE_ATR = 0.8 # a recent bar within this many ATRs of the average = a real pullback
 SWING_LOOKBACK = 5      # bars used to find the pullback/swing for a tight stop
 SWING_BUF_ATR = 0.25    # place the stop this far beyond the swing
