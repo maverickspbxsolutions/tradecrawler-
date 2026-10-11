@@ -1,5 +1,15 @@
 # Crypto Signal Terminal — PRD
 
+## CHANGE (2026-10-11) — Consolidation detection + breakout-retest entries (edge.py)
+- User ask: factor in CONSOLIDATION (tight sideways range = indecision -> wait) and RETEST (price returns to a broken support/resistance after a breakout; if it holds, higher-probability entry).
+- edge.py new `_retest(high, low, close, atr_v)`: box = range over bars [-50:-12]; detects a break beyond box_high/low in last 12 bars, a pullback touch (last 4 bars) back to the level within 0.75*ATR, price still holding the level and turning in the breakout direction. Returns (direction, level) or None.
+- Consolidation read: tight_range = 20-bar range <= 3.2*ATR, OR bbw_squeeze (BB width in bottom 30th pct of last 60); consolidating = adx<22 AND (tight_range or squeeze).
+- Regime priority re-ordered in assess(): breakout(retest) > momentum > consolidation(WAIT, not tradeable) > reversion > chop. Consolidation returns a friendly "coiling, waiting for breakout+retest" reason.
+- New "breakout" branch: base score +40, +10 if MACD hist aligns, +8 if EMA20/50 aligns, +6 RSI ok; trigger "Breakout retest holding near <level>"; TIGHT stop just beyond the retested level (SWING_BUF_ATR beyond, floor 0.4*ATR) — if the level fails the breakout is void. Plain-English reason included.
+- Verified: synthetic consolidation -> regime=consolidation (wait); synthetic bullish & bearish breakout-retest -> regime=breakout, correct side, tradeable (score 64, conf 78). LIVE scan shows new labels working (Gold/Vol75 consolidation, Vol100 momentum tradeable). Backend clean.
+- Note: a retest only trades when confirmations align (base 40 alone waits); consolidation only steals genuinely tight ranges from reversion. PREVIEW only -> needs next deploy for production.
+
+
 ## CHANGE (2026-10-11) — Realistic SL/TP + lot ladder + explicit exit plan
 - User ask: tell the user WHEN to exit (TP, SL, and a time-based bail-out); set REALISTIC SL/TP; size by realistic lots NOT just balance. User chose: standard lot ladder 0.10->0.50 by confidence (balance-independent); add time-based exit instruction; SL/TP felt TOO WIDE.
 - risk_config.py: added LADDER_LOT_MIN=0.10, LADDER_LOT_MAX=0.50 and ladder_lot(confidence) (0.10 at MIN_CONFIDENCE -> 0.50 at 100). (risk_pct_for/confidence_lot kept but no longer used for proposal sizing.)

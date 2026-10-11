@@ -67,6 +67,32 @@ def _rsi_divergence(close: pd.Series, rsi: pd.Series, lookback: int = 20):
     return None
 
 
+def _retest(high: pd.Series, low: pd.Series, close: pd.Series, atr_v: float):
+    """Detect a breakout of a recent range followed by a successful RETEST of the
+    broken level (old resistance -> new support, or old support -> new resistance).
+    A held retest is a higher-probability entry. Returns (direction, level) or None."""
+    if len(close) < 55 or atr_v <= 0:
+        return None
+    box_high = float(high.iloc[-50:-12].max())    # the range that existed BEFORE the breakout
+    box_low = float(low.iloc[-50:-12].min())
+    price = float(close.iloc[-1])
+    prev = float(close.iloc[-2])
+    tol = 0.75 * atr_v
+    recent_high = float(high.iloc[-12:].max())     # the breakout push
+    recent_low = float(low.iloc[-12:].min())
+    pullback_low = float(low.iloc[-4:].min())      # the retest touch
+    pullback_high = float(high.iloc[-4:].max())
+    # Bullish: broke above the range, dipped back to retest the old ceiling, holding above it, turning up
+    if (recent_high > box_high + 0.15 * atr_v and pullback_low <= box_high + tol
+            and price >= box_high - 0.1 * atr_v and price > prev):
+        return ("Up", box_high)
+    # Bearish: broke below the range, popped back to retest the old floor, holding below it, turning down
+    if (recent_low < box_low - 0.15 * atr_v and pullback_high >= box_low - tol
+            and price <= box_low + 0.1 * atr_v and price < prev):
+        return ("Down", box_low)
+    return None
+
+
 def assess(candles: list, htf_dir: str | None = None) -> dict:
     """Score the current setup and pick a regime-appropriate direction."""
     if not candles or len(candles) < 80:
@@ -106,12 +132,26 @@ def assess(candles: list, htf_dir: str | None = None) -> dict:
     if len(vol) > 20 and float(vol.iloc[-20:].mean()) > 0:
         vol_ratio = float(vol.iloc[-3:].mean()) / float(vol.iloc[-20:].mean())
 
+    # ---- consolidation & breakout-retest reads ----
+    retest = _retest(high, low, close, atr_v)
+    rng20 = float(high.iloc[-20:].max()) - float(low.iloc[-20:].min())
+    tight_range = atr_v > 0 and rng20 <= 3.2 * atr_v
+    bbw_squeeze = len(bbw) > 60 and float(bbw.iloc[-1]) <= float(bbw.iloc[-60:].quantile(0.30))
+    consolidating = adx < 22.0 and (tight_range or bbw_squeeze)
+
     # ---- regime ----
-    # momentum = a decent trend that's also persistent, or a strong trend even if
-    # VR is neutral; reversion = anti-persistent and not strongly trending.
-    # Only genuinely directionless markets fall through to "chop".
-    if (adx >= ADX_TREND and vr >= VR_PERSIST) or (adx >= 30 and vr >= 0.97):
+    # A confirmed breakout-RETEST is the highest-quality read and takes priority.
+    # A tight CONSOLIDATION means "wait for the breakout" — don't force a trade.
+    # Otherwise: momentum (persistent trend) or reversion (anti-persistent range).
+    if retest is not None:
+        regime = "breakout"
+    elif (adx >= ADX_TREND and vr >= VR_PERSIST) or (adx >= 30 and vr >= 0.97):
         regime = "momentum"
+    elif consolidating:
+        return {"tradeable": False, "regime": "consolidation", "regime_label": "Consolidating",
+                "adx": round(adx),
+                "reason": "Price is coiling in a tight range — buyers and sellers are balanced. "
+                          "Waiting for a breakout and a retest of the level to confirm before entering."}
     elif vr <= VR_REVERT and adx < ADX_TREND:
         regime = "reversion"
     else:
@@ -170,7 +210,31 @@ def assess(candles: list, htf_dir: str | None = None) -> dict:
                     "direction": direction, "side": "BUY" if up else "SELL", "score": score,
                     "reason": "The trend's a bit extended here — waiting for a small pullback to get in at a better price."}
         swing_dist = _swing_stop_dist(high, low, price, up, atr_v)
-    else:  # range-bound — buy dips / sell spikes back toward the average
+    elif regime == "breakout":
+        regime_label = "Breakout retest"
+        rdir, level = retest
+        direction = rdir
+        up = direction == "Up"
+        score += 40
+        reasons.append(
+            f"Price broke {'above a resistance' if up else 'below a support'} level, came back to "
+            f"retest it, and the level is holding — that confirms the breakout and marks a "
+            f"higher-probability entry.")
+        h = float(hist.iloc[-1])
+        if (up and h > 0) or (not up and h < 0):
+            score += 10
+            reasons.append("Momentum is pushing the same way as the breakout.")
+        if (up and e20 >= e50) or (not up and e20 <= e50):
+            score += 8
+            reasons.append("The broader trend is aligned with the breakout.")
+        if (up and r < 72) or (not up and r > 28):
+            score += 6
+        trigger = f"Breakout retest holding near {round(level, 6)}"
+        # tight stop just beyond the retested level — if it fails, the breakout is void
+        buf = SWING_BUF_ATR * atr_v
+        swing_dist = (price - (level - buf)) if up else ((level + buf) - price)
+        swing_dist = max(swing_dist, 0.4 * atr_v)
+    else:  # reversion — range-bound — buy dips / sell spikes back toward the average
         regime_label = "Range-bound"
         mean = float(ma20.iloc[-1]) if ma20.iloc[-1] == ma20.iloc[-1] else price
         if price < mean and r < 50:
