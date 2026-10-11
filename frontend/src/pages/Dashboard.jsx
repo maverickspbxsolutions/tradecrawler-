@@ -63,7 +63,14 @@ export default function Dashboard() {
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
           <div className="lg:col-span-8 space-y-3">
-            <PriceChart symbol={selected?.symbol || "BTCUSDT"} tf={tf} onTfChange={setTf} />
+            <PriceChart
+              symbol={selected?.symbol || "BTCUSDT"}
+              tf={tf}
+              onTfChange={setTf}
+              strategies={strategies || []}
+              selectedId={selectedId}
+              onSelectAsset={setSelectedId}
+            />
             <MarketOutlook symbol={selected?.symbol || "BTCUSDT"} tf={tf} />
             <SignalFeed />
           <MiniSimulations strategy={selected} />

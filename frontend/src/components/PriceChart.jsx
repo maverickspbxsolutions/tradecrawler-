@@ -20,7 +20,7 @@ function sinceLabel(ms) {
   return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 }
 
-export function PriceChart({ symbol, tf, onTfChange }) {
+export function PriceChart({ symbol, tf, onTfChange, strategies = [], selectedId, onSelectAsset }) {
   const theme = useChartTheme();
   const [now, setNow] = useState(Date.now());
   const [range, setRange] = useState("LIVE");
@@ -102,7 +102,26 @@ export function PriceChart({ symbol, tf, onTfChange }) {
     <div className="border border-border/40 bg-card rounded-sm" data-testid="price-chart">
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-border/40">
         <div className="flex items-baseline gap-3 flex-wrap">
-          <span className="num text-lg font-semibold">{symbol}</span>
+          {strategies.length > 0 && onSelectAsset ? (
+            <Select value={selectedId || undefined} onValueChange={onSelectAsset}>
+              <SelectTrigger
+                className="h-8 w-auto min-w-[150px] gap-2 rounded-sm border-border/50 bg-muted/30 px-2.5 text-lg font-semibold"
+                data-testid="asset-switcher"
+              >
+                <SelectValue placeholder={symbol} />
+              </SelectTrigger>
+              <SelectContent className="max-h-80">
+                {strategies.map((s) => (
+                  <SelectItem key={s.id} value={s.id} className="text-sm" data-testid={`asset-option-${s.symbol}`}>
+                    <span className="font-semibold">{s.name}</span>
+                    <span className="num text-[11px] text-muted-foreground ml-2">{s.symbol}</span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : (
+            <span className="num text-lg font-semibold">{symbol}</span>
+          )}
           <span className="num text-xl" style={{ color: up ? theme.buy : theme.sell }} data-testid="price-last">
             {last != null ? fmtUsd(last, last < 10 ? 4 : 2) : "—"}
           </span>

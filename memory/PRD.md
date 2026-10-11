@@ -1,5 +1,12 @@
 # Crypto Signal Terminal — PRD
 
+## CHANGE (2026-10-11) — Asset switcher dropdown in chart header
+- User ask: a dropdown to switch between assets without scrolling down to the StrategyList.
+- PriceChart.jsx: replaced the static symbol title with a shadcn Select (data-testid="asset-switcher") listing all strategies (name + symbol); onValueChange -> setSelectedId. Falls back to plain symbol text if no strategies/handler.
+- Dashboard.jsx: passes strategies, selectedId, onSelectAsset={setSelectedId} to PriceChart.
+- Verified via screenshot: dropdown renders in header, lists active assets with a check on the selected one, switching updates chart + outlook. Frontend compiled. PREVIEW only -> needs next deploy for production.
+
+
 ## CHANGE (2026-10-11) — Consolidation detection + breakout-retest entries (edge.py)
 - User ask: factor in CONSOLIDATION (tight sideways range = indecision -> wait) and RETEST (price returns to a broken support/resistance after a breakout; if it holds, higher-probability entry).
 - edge.py new `_retest(high, low, close, atr_v)`: box = range over bars [-50:-12]; detects a break beyond box_high/low in last 12 bars, a pullback touch (last 4 bars) back to the level within 0.75*ATR, price still holding the level and turning in the breakout direction. Returns (direction, level) or None.
